@@ -1,36 +1,46 @@
 package net4g
 
 import (
-	"reflect"
 	"log"
+	"reflect"
+	"sync"
 )
 
-func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes)  {
+func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes) {
 	for _, p := range dispatchers {
-		p.dispatchChan <- &dispatchChan{req: req, res: res}
+		p.dispatchChan <- &dispatchData{req: req, res: res}
 	}
 }
 
-func NewDispatcher() *dispatcher {
+func NewDispatcher(name string) *dispatcher {
 	p := new(dispatcher)
-	p.dispatchChan = make(chan *dispatchChan, 1000)
+	p.Name = name
+	p.dispatchChan = make(chan *dispatchData, 1000)
+	p.closeSessionChan = make(chan NetSession, 100)
+	p.destroyChan = make(chan bool, 1)
 	p.typeHandlers = make(map[reflect.Type]func(req NetReq, res NetRes))
 	p.run()
-	log.Println("New a dispatcher")
+	log.Printf("new a %s dispatcher\n", name)
 	return p
 }
 
-type dispatchChan struct {
+type dispatchData struct {
 	req NetReq
 	res NetRes
 }
 
 type dispatcher struct {
+	Name                string
 	globalHandlers      []func(req NetReq, res NetRes)
 	typeHandlers        map[reflect.Type]func(req NetReq, res NetRes)
 	before_interceptors []func(req NetReq, res NetRes)
 	after_interceptors  []func(req NetReq, res NetRes)
-	dispatchChan        chan *dispatchChan
+	dispatchChan        chan *dispatchData
+	closeSessionChan    chan NetSession
+	closeSessionHandler func(session NetSession)
+	destroyChan         chan bool
+	destroyHandler      func()
+	wg                  sync.WaitGroup
 }
 
 func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Type) {
@@ -41,32 +51,70 @@ func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Typ
 	}
 }
 
-func (p *dispatcher) run() {
+func (p *dispatcher) SetCloseSessionHandler(h func(session NetSession)) {
+	p.closeSessionHandler = h
+}
 
+func (p *dispatcher) SetDestroyHandler(h func()) {
+	p.destroyHandler = h
+}
+
+func (p *dispatcher) dispatch(msg *dispatchData) {
+	for _, i := range p.before_interceptors {
+		i(msg.req, msg.res)
+	}
+
+	for _, h := range p.globalHandlers {
+		h(msg.req, msg.res)
+	}
+
+	t := reflect.TypeOf(msg.req.Msg())
+	if h, ok := p.typeHandlers[t]; ok {
+		h(msg.req, msg.res)
+	} else {
+		//log.Printf("not found any handler for %v", t)
+	}
+
+	for _, i := range p.after_interceptors {
+		i(msg.req, msg.res)
+	}
+}
+
+func (p *dispatcher) run() {
 	// one dispatcher, one goroutine
 	go func() {
 		for {
-			msg := <- p.dispatchChan
-
-			for _, i := range p.before_interceptors {
-				i(msg.req, msg.res)
+			select {
+			case data := <-p.dispatchChan:
+				p.dispatch(data)
+			case session := <-p.closeSessionChan:
+				if p.closeSessionHandler != nil {
+					p.closeSessionHandler(session)
+				}
+				p.wg.Done()
+			case  <-p.destroyChan:
+				if p.destroyHandler != nil {
+					p.destroyHandler()
+				}
+				close(p.dispatchChan)
+				close(p.closeSessionChan)
+				close(p.destroyChan)
+				p.wg.Done()
+				return
 			}
 
-			for _, h := range p.globalHandlers {
-				h(msg.req, msg.res)
-			}
-
-			t := reflect.TypeOf(msg.req.Msg())
-			if h, ok := p.typeHandlers[t]; ok {
-				h(msg.req, msg.res)
-			} else {
-				//log.Printf("not found any handler for %v", t)
-			}
-
-			for _, i := range p.after_interceptors {
-				i(msg.req, msg.res)
-			}
 		}
 	}()
+}
 
+func (p *dispatcher) CloseSession(session NetSession) {
+	p.closeSessionChan <- session
+	p.wg.Add(1)
+	p.wg.Wait()
+}
+
+func (p *dispatcher) Destroy() {
+	p.destroyChan <- true
+	p.wg.Add(1)
+	p.wg.Wait()
 }

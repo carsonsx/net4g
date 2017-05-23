@@ -7,7 +7,10 @@ import (
 	"time"
 	"os"
 	"os/signal"
+	"syscall"
 )
+
+var Terminal = syscall.SIGTERM
 
 func NewTcpClient(addr string, serializer ...Serializer) *tcpClient {
 	client := new(tcpClient)
@@ -75,7 +78,7 @@ func (c *tcpClient) Run() {
 			}
 			c.wg.Done()
 			if !c.closingBySignal {
-				c.sig <- os.Interrupt
+				c.sig <- Terminal
 			}
 		}()
 	}
@@ -83,6 +86,10 @@ func (c *tcpClient) Run() {
 	c.wg.Add(1)
 	go func() {
 		newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(nil, nil)
+		c.mgr.Remove(c.conn)
+		for _, d := range c.dispatchers {
+			d.CloseSession(c.conn.Session())
+		}
 		c.wg.Done()
 	}()
 }
@@ -95,14 +102,23 @@ func (c *tcpClient) Write(v interface{}) error {
 }
 
 func (c *tcpClient) Close() {
-	c.conn.Close()
+	log.Printf("client[%s] listener was closed", c.Addr)
+	//close all connections
+	c.mgr.CloseConnections()
+	c.wg.Wait()
+	log.Printf("client[%s] manager was closed", c.Addr)
+	c.mgr.Close()
+	for _, d := range c.dispatchers {
+		d.Destroy()
+	}
+	log.Printf("client[%s] closed", c.Addr)
+
 }
 
-func (c *tcpClient) SafeWait()  {
+func (c *tcpClient) Wait()  {
 	signal.Notify(c.sig, os.Interrupt, os.Kill)
-	log.Printf("client is closing with signal %v\n", <-c.sig)
+	log.Printf("client[%s] is closing with signal %v\n", c.Addr, <-c.sig)
 	c.closingBySignal = true
-	c.mgr.Close()
-	c.wg.Wait()
+	c.Close()
 
 }

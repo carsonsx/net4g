@@ -94,6 +94,9 @@ func (s *tcpServer) listen() {
 			})
 			//close event
 			s.mgr.Remove(conn)
+			for _, d := range s.dispatchers {
+				d.CloseSession(conn.Session())
+			}
 			s.wg.Done()
 		}()
 	}
@@ -111,13 +114,28 @@ func (s *tcpServer) BroadcastOthers(mySession NetSession, v interface{}) error {
 	return newNetRes(nil, s.serializer, s.mgr).BroadcastOthers(mySession, v)
 }
 
-func (s *tcpServer) SafeWait()  {
+func (s *tcpServer) close()  {
+	//close listener
+	s.listener.Close()
+	log.Printf("server[%s] listener was closed", s.Addr)
+	//close all connections
+	s.mgr.CloseConnections()
+	s.wg.Wait()
+	log.Printf("server[%s] manager was closed", s.Addr)
+	s.mgr.Close()
+	for _, d := range s.dispatchers {
+		d.Destroy()
+	}
+	log.Printf("server[%s] closed", s.Addr)
+}
+
+func (s *tcpServer) Wait(others ...*tcpServer)  {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, os.Kill)
-	log.Printf("Server is closing with signal %v\n", <-sig)
-	//notify dispatchers the server is closing
-	s.listener.Close()
-	s.mgr.Close()
-	s.wg.Wait()
-	log.Println("Client was closed safely")
+	log.Printf("server[%s] is closing with signal %v\n", s.Addr, <-sig)
+	for _, other := range others {
+		other.close()
+	}
+	s.close()
+	log.Println("server was closed safely")
 }

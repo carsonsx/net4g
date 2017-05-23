@@ -2,8 +2,6 @@ package net4g
 
 import (
 	"bytes"
-	"io"
-	"log"
 )
 
 var heartBeatDataLen = len(NetConfig.HeartbeatData)
@@ -45,11 +43,7 @@ func (r *netReader) Read(before func (), after func (data []byte))  {
 
 		data, err := r.conn.Read()
 		if err != nil {
-			if err != io.EOF {
-				r.conn.Close()
-			} else {
-				log.Println("connection was closed")
-			}
+			r.conn.Close()
 			break
 		}
 

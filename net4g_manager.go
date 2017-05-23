@@ -33,9 +33,9 @@ func (m *NetManager) Run() {
 	m.removeChan = make(chan NetConn, 100)
 	m.heartbeatCheckChan = make(chan time.Time, 5)
 	m.broadcastChan = make(chan *broadcastData, 1000)
-	m.closing = make(chan bool, 1)
-	m.wg.Add(2)
+	m.closing = make(chan bool, 2)
 
+	m.wg.Add(1)
 	go func() {
 		heartbeatTimeout := NetConfig.HeartbeatFrequency + NetConfig.NetTolerableTime
 		for {
@@ -69,6 +69,7 @@ func (m *NetManager) Run() {
 
 	if m.heartbeat {
 		heartbeatTimer := time.NewTicker(HEART_BEAT_INTERVAL)
+		m.wg.Add(1)
 		go func() {
 			for {
 				select {
@@ -114,15 +115,18 @@ func (m *NetManager) BroadcastOthers(mySession NetSession, data []byte) {
 	})
 }
 
+func (m *NetManager) CloseConnections() {
+	log.Println("closing connections")
+	for conn := range m.connections {
+		conn.Close()
+	}
+}
+
 func (m *NetManager) Close() {
 	log.Println("closing manager")
 	m.closing <- true
 	m.closing <- true
 	m.wg.Wait()
-	log.Println("closing connections")
-	for conn := range m.connections {
-		conn.Close()
-	}
 	log.Println("closing channels")
 	close(m.addChan)
 	close(m.removeChan)

@@ -94,7 +94,7 @@ func (c *tcpNetConn) Write(p []byte) error {
 	if !c.closed {
 		c.writeChan <- p
 	} else {
-		text := "write failed: connection is closed"
+		text := "write failed: connection was closed"
 		log.Println(text)
 		return errors.New(text)
 	}
