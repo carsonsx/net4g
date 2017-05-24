@@ -2,7 +2,6 @@ package net4g
 
 import (
 	"bytes"
-	"log"
 )
 
 var heartBeatDataLen = len(NetConfig.HeartbeatData)

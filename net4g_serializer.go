@@ -159,7 +159,7 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 				return
 			}
 			data = AddIntHeader(data, NetConfig.ProtobufIdSize, uint64(id), NetConfig.LittleEndian)
-			log.Printf("serilized %v: %s", t, string(data))
+			log.Printf("serilized %v - %s", t, string(data))
 		} else {
 			err = errors.New(fmt.Sprintf("%v is not registed by any id", t))
 			log.Println(err)
@@ -191,7 +191,7 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 		id := int(GetIntHeader(data, NetConfig.ProtobufIdSize, NetConfig.LittleEndian))
 		if t, ok := s.typesOfId[id]; ok {
 			value := reflect.New(t.Elem()).Interface()
-			err = json.Unmarshal(data, value)
+			err = json.Unmarshal(data[NetConfig.ProtobufIdSize:], value)
 			if err != nil {
 				log.Println(err)
 			} else {
