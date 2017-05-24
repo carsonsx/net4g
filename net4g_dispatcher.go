@@ -17,7 +17,7 @@ func NewDispatcher(name string) *dispatcher {
 	p.Name = name
 	p.dispatchChan = make(chan *dispatchData, 1000)
 	p.closeSessionChan = make(chan NetSession, 100)
-	p.destroyChan = make(chan bool, 1)
+	p.closeChan = make(chan bool, 1)
 	p.typeHandlers = make(map[reflect.Type]func(req NetReq, res NetRes))
 	p.run()
 	log.Printf("new a %s dispatcher\n", name)
@@ -40,8 +40,8 @@ type dispatcher struct {
 	dispatchChan        chan *dispatchData
 	closeSessionChan    chan NetSession
 	closeSessionHandler func(session NetSession)
-	destroyChan         chan bool
-	destroyHandler      func()
+	closeChan           chan bool
+	closeHandler        func()
 	wg                  sync.WaitGroup
 }
 
@@ -59,8 +59,8 @@ func (p *dispatcher) SetCloseSessionHandler(h func(session NetSession)) {
 	p.closeSessionHandler = h
 }
 
-func (p *dispatcher) SetDestroyHandler(h func()) {
-	p.destroyHandler = h
+func (p *dispatcher) SetCloseHandler(h func()) {
+	p.closeHandler = h
 }
 
 func (p *dispatcher) dispatch(msg *dispatchData) {
@@ -85,8 +85,10 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 }
 
 func (p *dispatcher) run() {
+	p.wg.Add(1)
 	// one dispatcher, one goroutine
 	go func() {
+	outer:
 		for {
 			select {
 			case data := <-p.dispatchChan:
@@ -95,18 +97,15 @@ func (p *dispatcher) run() {
 				if p.closeSessionHandler != nil {
 					p.closeSessionHandler(session)
 				}
-				p.wg.Done()
-			case  <-p.destroyChan:
-				if p.destroyHandler != nil {
-					p.destroyHandler()
+				session.GetValue("wg").(*sync.WaitGroup).Done()
+			case <-p.closeChan:
+				if p.closeHandler != nil {
+					p.closeHandler()
 				}
-				close(p.dispatchChan)
-				close(p.closeSessionChan)
-				close(p.destroyChan)
-				p.wg.Done()
-				return
+				break outer
 			}
 		}
+		p.wg.Done()
 	}()
 }
 
@@ -141,13 +140,18 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error 
 }
 
 func (p *dispatcher) CloseSession(session NetSession) {
+	wg := new (sync.WaitGroup)
+	wg.Add(1)
+	session.SetValue("wg", wg)
 	p.closeSessionChan <- session
-	p.wg.Add(1)
-	p.wg.Wait()
+	wg.Wait()
+	session.RemoveValue("wg")
 }
 
-func (p *dispatcher) Destroy() {
-	p.destroyChan <- true
-	p.wg.Add(1)
+func (p *dispatcher) Close() {
+	p.closeChan <- true
 	p.wg.Wait()
+	close(p.dispatchChan)
+	close(p.closeSessionChan)
+	close(p.closeChan)
 }

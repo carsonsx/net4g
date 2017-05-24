@@ -7,6 +7,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"log"
 	"reflect"
+	"github.com/carsonsx/net4g/util"
 )
 
 type Serializer interface {
@@ -158,7 +159,7 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 				log.Println(err)
 				return
 			}
-			data = AddIntHeader(data, NetConfig.ProtobufIdSize, uint64(id), NetConfig.LittleEndian)
+			data = util.AddIntHeader(data, NetConfig.ProtobufIdSize, uint64(id), NetConfig.LittleEndian)
 			log.Printf("serilized %v - %s", t, string(data))
 		} else {
 			err = errors.New(fmt.Sprintf("%v is not registed by any id", t))
@@ -188,7 +189,7 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 	}
 
 	if s.byId {
-		id := int(GetIntHeader(data, NetConfig.ProtobufIdSize, NetConfig.LittleEndian))
+		id := int(util.GetIntHeader(data, NetConfig.ProtobufIdSize, NetConfig.LittleEndian))
 		if t, ok := s.typesOfId[id]; ok {
 			value := reflect.New(t.Elem()).Interface()
 			err = json.Unmarshal(data[NetConfig.ProtobufIdSize:], value)
@@ -257,7 +258,7 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 			log.Println(err)
 			return
 		}
-		data = AddIntHeader(data, NetConfig.ProtobufIdSize, uint64(id), NetConfig.LittleEndian)
+		data = util.AddIntHeader(data, NetConfig.ProtobufIdSize, uint64(id), NetConfig.LittleEndian)
 	} else {
 		err = errors.New(fmt.Sprintf("%v is not registed by any id", t))
 	}
@@ -268,7 +269,7 @@ func (s *protobufSerializer) Deserialize(data []byte) (v interface{}, err error)
 	if !s.registered {
 		panic("not registered any id")
 	}
-	id := int(GetIntHeader(data, NetConfig.ProtobufIdSize, NetConfig.LittleEndian))
+	id := int(util.GetIntHeader(data, NetConfig.ProtobufIdSize, NetConfig.LittleEndian))
 	if t, ok := s.typesOfId[id]; ok {
 		value := reflect.New(t.Elem()).Interface()
 		err = proto.UnmarshalMerge(data, value.(proto.Message))

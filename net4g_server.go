@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"time"
 	"fmt"
+	"github.com/carsonsx/net4g/util"
+	"runtime"
 )
 
 func NewTcpServer(name, addr string, serializer ...Serializer) *tcpServer {
@@ -30,9 +32,10 @@ type tcpServer struct {
 	mutex       sync.Mutex
 	mgr         *NetManager
 	heartbeat   bool
-	listener net.Listener
-	wg sync.WaitGroup
-	started bool
+	listener    net.Listener
+	closeConn   sync.WaitGroup
+	closeListen sync.WaitGroup
+	started     bool
 }
 
 func (s *tcpServer) AddDispatchers(dispatchers ...*dispatcher) *tcpServer {
@@ -53,6 +56,7 @@ func (s *tcpServer) EnableHeartbeat() *tcpServer {
 }
 
 func (s *tcpServer) Start() *tcpServer {
+
 	var err error
 	s.listener, err = net.Listen("tcp", s.Addr)
 	if err != nil {
@@ -70,10 +74,9 @@ func (s *tcpServer) Start() *tcpServer {
 		d.mgr = s.mgr
 	}
 
-	s.wg.Add(1)
 	go func() {
 		s.listen()
-		s.wg.Done()
+		s.closeListen.Done()
 	}()
 
 	s.started = true
@@ -87,11 +90,12 @@ func (s *tcpServer) listen() {
 	maxDelay := time.Second
 
 	for {
+		log.Printf("total goroutine: %d", runtime.NumGoroutine())
 		netconn, err := s.listener.Accept()
 		if err != nil {
 			log.Println(err)
 			if neterr, ok := err.(net.Error); ok && neterr.Temporary() {
-				delay = SmartSleep(delay, maxDelay)
+				delay = util.SmartSleep(delay, maxDelay)
 				continue
 			}
 			break
@@ -100,7 +104,7 @@ func (s *tcpServer) listen() {
 		//new event
 		conn := NewNetConn(netconn)
 		s.mgr.Add(conn)
-		s.wg.Add(1)
+		s.closeConn.Add(1)
 		go func() {// one connection, one goroutine to read
 			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(nil, func(data []byte) {
 				if s.heartbeat && IsHeartbeatData(data) {
@@ -113,24 +117,35 @@ func (s *tcpServer) listen() {
 			for _, d := range s.dispatchers {
 				d.CloseSession(conn.Session())
 			}
-			s.wg.Done()
+			log.Printf("disconnected from %s", conn.RemoteAddr().String())
+			s.closeConn.Done()
 		}()
 	}
 }
 
 func (s *tcpServer) close()  {
 	//close listener
+	s.closeListen.Add(1)
 	s.listener.Close()
-	log.Printf("server[%s] listener was closed", s.Addr)
+	s.closeListen.Wait()
+	log.Printf("closed server[%s] listener", s.Addr)
+
 	//close all connections
 	s.mgr.CloseConnections()
-	s.wg.Wait()
-	log.Printf("server[%s] manager was closed", s.Addr)
+	log.Printf("closed server[%s] connections/readers", s.Addr)
+	s.closeConn.Wait()
+
+	//close net manager
 	s.mgr.Close()
+	log.Printf("closed server[%s] manager", s.Addr)
+
+	//close dispatchers
 	for _, d := range s.dispatchers {
-		d.Destroy()
+		d.Close()
 	}
-	log.Printf("server[%s] closed", s.Addr)
+	log.Printf("closed server[%s] dispatcher", s.Addr)
+
+	log.Printf("closed server[%s]", s.Addr)
 }
 
 func (s *tcpServer) Wait(others ...*tcpServer)  {
@@ -141,5 +156,4 @@ func (s *tcpServer) Wait(others ...*tcpServer)  {
 		other.close()
 	}
 	s.close()
-	log.Println("server was closed safely")
 }

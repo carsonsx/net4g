@@ -1,8 +1,7 @@
-package net4g
+package util
 
 import (
 	"encoding/binary"
-	"time"
 )
 
 func AddIntHeader(data []byte, headerSize int, header uint64, littleEndian bool) []byte {
@@ -64,14 +63,3 @@ func GetIntHeader(data []byte, headerSize int, littleEndian bool) int64 {
 	return header
 }
 
-func SmartSleep(d time.Duration, max time.Duration) time.Duration {
-	if d == 0 {
-		panic("time must be more than 0")
-	}
-	time.Sleep(d)
-	d = d * 2
-	if d > max {
-		return max
-	}
-	return d
-}

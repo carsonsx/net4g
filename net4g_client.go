@@ -109,7 +109,7 @@ func (c *tcpClient) Close() {
 	log.Printf("client[%s] manager was closed", c.Addr)
 	c.mgr.Close()
 	for _, d := range c.dispatchers {
-		d.Destroy()
+		d.Close()
 	}
 	log.Printf("client[%s] closed", c.Addr)
 

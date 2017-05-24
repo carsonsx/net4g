@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"github.com/carsonsx/net4g/util"
 )
 
 type NetWriter interface {
@@ -60,7 +61,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 		}
 		return
 	}
-	msgLen := GetIntHeader(header, NetConfig.MessageLengthSize, NetConfig.LittleEndian)
+	msgLen := util.GetIntHeader(header, NetConfig.MessageLengthSize, NetConfig.LittleEndian)
 	data = make([]byte, msgLen)
 	if msgLen > 0 {
 		_, err = io.ReadFull(c.conn, data)
@@ -69,7 +70,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 			return
 		}
 	}
-	log.Printf("read: %v\n", data)
+	//log.Printf("read: %v\n", data)
 	return
 }
 
@@ -77,12 +78,12 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 func (c *tcpNetConn) startWriting() {
 	go func() {
 		for data := range c.writeChan {
-			pack := AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
+			pack := util.AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
 			_, err := c.conn.Write(pack)
 			if err != nil {
 				log.Println(err)
 			} else {
-				log.Printf("writen: %v\n", data)
+				//log.Printf("writen: %v\n", data)
 			}
 		}
 	}()
