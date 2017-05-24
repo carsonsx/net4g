@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"time"
+	"fmt"
 )
 
-func NewTcpServer(addr string, serializer ...Serializer) *tcpServer {
+func NewTcpServer(name, addr string, serializer ...Serializer) *tcpServer {
 	server := new(tcpServer)
+	server.Name = name
 	server.Addr = addr
 	if len(serializer) > 0 {
 		server.serializer = serializer[0]
@@ -21,6 +23,7 @@ func NewTcpServer(addr string, serializer ...Serializer) *tcpServer {
 }
 
 type tcpServer struct {
+	Name        string
 	Addr        string
 	serializer  Serializer
 	dispatchers []*dispatcher
@@ -29,10 +32,16 @@ type tcpServer struct {
 	heartbeat   bool
 	listener net.Listener
 	wg sync.WaitGroup
+	started bool
 }
 
 func (s *tcpServer) AddDispatchers(dispatchers ...*dispatcher) *tcpServer {
 	for _, d := range dispatchers {
+		if d.serializer != nil {
+			panic(fmt.Sprintf("dispatcher [%s] has bind with server [%s]", d.Name, s.Name))
+		}
+		d.serializer = s.serializer
+		d.mgr = s.mgr
 		s.dispatchers = append(s.dispatchers, d)
 	}
 	return s
@@ -54,13 +63,20 @@ func (s *tcpServer) Start() *tcpServer {
 	// Init the connection manager
 	s.mgr = new (NetManager)
 	s.mgr.heartbeat = s.heartbeat
-	s.mgr.Run()
+	s.mgr.Start()
+
+	for _, d := range s.dispatchers {
+		d.serializer = s.serializer
+		d.mgr = s.mgr
+	}
 
 	s.wg.Add(1)
 	go func() {
 		s.listen()
 		s.wg.Done()
 	}()
+
+	s.started = true
 
 	return s
 }
@@ -100,18 +116,6 @@ func (s *tcpServer) listen() {
 			s.wg.Done()
 		}()
 	}
-}
-
-func (s *tcpServer) Broadcast(v interface{}, filter func(session NetSession) bool) error {
-	return newNetRes(nil, s.serializer, s.mgr).Broadcast(v, filter)
-}
-
-func (s *tcpServer) BroadcastAll(v interface{}) error {
-	return newNetRes(nil, s.serializer, s.mgr).BroadcastAll(v)
-}
-
-func (s *tcpServer) BroadcastOthers(mySession NetSession, v interface{}) error {
-	return newNetRes(nil, s.serializer, s.mgr).BroadcastOthers(mySession, v)
 }
 
 func (s *tcpServer) close()  {

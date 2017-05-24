@@ -60,7 +60,7 @@ func (c *tcpClient) Run() {
 	// Init the connection manager
 	c.mgr = new(NetManager)
 	c.mgr.heartbeat = c.heartbeat
-	c.mgr.Run()
+	c.mgr.Start()
 	c.mgr.Add(c.conn)
 
 	if c.heartbeat {

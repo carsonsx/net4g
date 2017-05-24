@@ -2,6 +2,7 @@ package net4g
 
 import (
 	"bytes"
+	"log"
 )
 
 var heartBeatDataLen = len(NetConfig.HeartbeatData)
@@ -33,7 +34,7 @@ type netReader struct {
 func (r *netReader) Read(before func (), after func (data []byte))  {
 
 	req := newNetReq(nil, nil, r.conn.RemoteAddr(), r.conn.Session())
-	res := newNetRes(r.conn, r.serializer, r.mgr)
+	res := newNetRes(r.conn, r.serializer)
 
 	for {
 
@@ -66,6 +67,5 @@ func (r *netReader) Read(before func (), after func (data []byte))  {
 		req.msg = v
 
 		Dispatch(r.dispatchers, req, res)
-
 	}
 }

@@ -11,6 +11,12 @@ const (
 	HEART_BEAT_LAST_TIME = "__HEART_BEAT_LAST_TIME"
 )
 
+type NetConns interface {
+	Broadcast(data []byte, filter func(session NetSession) bool)
+	BroadcastAll(data []byte)
+	BroadcastOthers(mySession NetSession, data []byte)
+}
+
 type NetManager struct {
 	connections        map[NetConn]struct{}
 	addChan            chan NetConn
@@ -27,7 +33,7 @@ type broadcastData struct {
 	filter func(session NetSession) bool
 }
 
-func (m *NetManager) Run() {
+func (m *NetManager) Start() {
 	m.connections = make(map[NetConn]struct{})
 	m.addChan = make(chan NetConn, 100)
 	m.removeChan = make(chan NetConn, 100)

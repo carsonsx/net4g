@@ -2,7 +2,6 @@ package net4g
 
 import (
 	"net"
-	"log"
 )
 
 type NetSession interface {
@@ -106,8 +105,6 @@ func (s *netSession) GetData(key string, defaultValue ...interface{}) interface{
 	}
 }
 
-
-
 type NetReq interface {
 	Bytes()      []byte
 	Msg()        interface{}
@@ -132,11 +129,11 @@ type netReq struct {
 }
 
 func (req *netReq) Bytes() []byte {
-	return req.Bytes()
+	return req.bytes
 }
 
 func (req *netReq) Msg() interface{} {
-	return req.Msg
+	return req.msg
 }
 
 func (req *netReq) RemoteAddr() net.Addr {
@@ -150,23 +147,19 @@ func (req *netReq) Session() NetSession {
 
 type NetRes interface {
 	Write(v interface{}) error
-	Broadcast(v interface{}, filter func(session NetSession) bool) error
-	BroadcastAll(v interface{}) error
-	BroadcastOthers(mySession NetSession, v interface{}) error
+	Close()
 }
 
-func newNetRes(conn NetConn, serializer Serializer, connMgr *NetManager) *netRes {
+func newNetRes(conn NetConn, serializer Serializer) *netRes {
 	res := new(netRes)
 	res.conn = conn
 	res.serializer = serializer
-	res.mgr = connMgr
 	return res
 }
 
 type netRes struct {
 	conn       NetConn
 	serializer Serializer
-	mgr        *NetManager
 }
 
 func (res *netRes) Write(v interface{}) error {
@@ -175,36 +168,6 @@ func (res *netRes) Write(v interface{}) error {
 		return err
 	}
 	res.conn.Write(data)
-	return nil
-}
-
-func (res *netRes) Broadcast(v interface{}, filter func(session NetSession) bool) error {
-	b, err := res.serializer.Serialize(v)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-	res.mgr.Broadcast(b, filter)
-	return nil
-}
-
-func (res *netRes) BroadcastAll(v interface{}) error {
-	b, err := res.serializer.Serialize(v)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-	res.mgr.BroadcastAll(b)
-	return nil
-}
-
-func (res *netRes) BroadcastOthers(mySession NetSession, v interface{}) error {
-	b, err := res.serializer.Serialize(v)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-	res.mgr.BroadcastOthers(mySession, b)
 	return nil
 }
 

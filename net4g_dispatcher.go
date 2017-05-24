@@ -31,6 +31,8 @@ type dispatchData struct {
 
 type dispatcher struct {
 	Name                string
+	serializer          Serializer
+	mgr                 *NetManager
 	globalHandlers      []func(req NetReq, res NetRes)
 	typeHandlers        map[reflect.Type]func(req NetReq, res NetRes)
 	before_interceptors []func(req NetReq, res NetRes)
@@ -46,8 +48,10 @@ type dispatcher struct {
 func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Type) {
 	if len(t) > 0 {
 		p.typeHandlers[t[0]] = h
+		log.Printf("added handler %v for %v\n", h, t[0])
 	} else {
 		p.globalHandlers = append(p.globalHandlers, h)
+		log.Printf("added global handler %v", h)
 	}
 }
 
@@ -72,7 +76,7 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 	if h, ok := p.typeHandlers[t]; ok {
 		h(msg.req, msg.res)
 	} else {
-		//log.Printf("not found any handler for %v", t)
+		log.Printf("not found any handler for %v", t)
 	}
 
 	for _, i := range p.after_interceptors {
@@ -105,6 +109,36 @@ func (p *dispatcher) run() {
 
 		}
 	}()
+}
+
+func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool) error {
+	b, err := p.serializer.Serialize(v)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	p.mgr.Broadcast(b, filter)
+	return nil
+}
+
+func (p *dispatcher) BroadcastAll(v interface{}) error {
+	b, err := p.serializer.Serialize(v)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	p.mgr.BroadcastAll(b)
+	return nil
+}
+
+func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error {
+	b, err := p.serializer.Serialize(v)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	p.mgr.BroadcastOthers(mySession, b)
+	return nil
 }
 
 func (p *dispatcher) CloseSession(session NetSession) {
