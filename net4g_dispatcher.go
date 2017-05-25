@@ -97,7 +97,7 @@ func (p *dispatcher) run() {
 				if p.closeSessionHandler != nil {
 					p.closeSessionHandler(session)
 				}
-				session.GetValue("wg").(*sync.WaitGroup).Done()
+				session.Get("wg").(*sync.WaitGroup).Done()
 			case <-p.closeChan:
 				if p.closeHandler != nil {
 					p.closeHandler()
@@ -142,10 +142,10 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error 
 func (p *dispatcher) CloseSession(session NetSession) {
 	wg := new (sync.WaitGroup)
 	wg.Add(1)
-	session.SetValue("wg", wg)
+	session.Set("wg", wg)
 	p.closeSessionChan <- session
 	wg.Wait()
-	session.RemoveValue("wg")
+	session.Remove("wg")
 }
 
 func (p *dispatcher) Close() {

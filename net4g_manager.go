@@ -82,7 +82,7 @@ func (m *NetManager) Remove(conn NetConn) {
 
 func (m *NetManager) Heartbeat(conn NetConn) {
 	if m.heartbeat {
-		conn.Session().SetValue(HEART_BEAT_LAST_TIME, time.Now().UnixNano())
+		conn.Session().Set(HEART_BEAT_LAST_TIME, time.Now().UnixNano())
 	}
 }
 

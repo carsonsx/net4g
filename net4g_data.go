@@ -6,13 +6,14 @@ import (
 )
 
 type NetSession interface {
-	SetValue(key string, value interface{})
+	Set(key string, value interface{})
 	GetString(key string, defaultValue ...string) string
 	GetInt(key string, defaultValue ...int) int
 	GetInt64(key string, defaultValue ...int64) int64
 	GetBool(key string, defaultValue ...bool) bool
-	GetValue(key string, defaultValue ...interface{}) interface{}
-	RemoveValue(key string)
+	Get(key string, defaultValue ...interface{}) interface{}
+	Has(key string) bool
+	Remove(key string)
 }
 
 func NewNetSession() NetSession {
@@ -66,11 +67,11 @@ func (s *netSession) GetBool(key string, defaultValue ...bool) bool {
 	}
 }
 
-func (s *netSession) SetValue(key string, value interface{}) ()  {
+func (s *netSession) Set(key string, value interface{}) ()  {
 	s.map_data.Put(key, value)
 }
 
-func (s *netSession) GetValue(key string, defaultValue ...interface{}) interface{} {
+func (s *netSession) Get(key string, defaultValue ...interface{}) interface{} {
 	if value := s.map_data.Get(key); value != nil{
 		return value
 	} else if len(defaultValue) > 0 {
@@ -80,7 +81,12 @@ func (s *netSession) GetValue(key string, defaultValue ...interface{}) interface
 	}
 }
 
-func (s *netSession) RemoveValue(key string) ()  {
+func (s *netSession) Has(key string) bool {
+	return s.map_data.ContainsKey(key)
+}
+
+
+func (s *netSession) Remove(key string) ()  {
 	s.map_data.Remove(key)
 }
 

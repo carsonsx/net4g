@@ -150,10 +150,11 @@ func (s *tcpServer) close()  {
 
 func (s *tcpServer) Wait(others ...*tcpServer)  {
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, os.Kill)
+	signal.Notify(sig, os.Interrupt, os.Kill) // created 1 goroutine
 	log.Printf("server[%s] is closing with signal %v\n", s.Addr, <-sig)
 	for _, other := range others {
 		other.close()
 	}
 	s.close()
+	close(sig)
 }
