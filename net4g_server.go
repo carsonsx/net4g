@@ -155,20 +155,13 @@ func (s *tcpServer) close() {
 
 func (s *tcpServer) Wait(others ...*tcpServer) {
 	sig := make(chan os.Signal, 1)
-<<<<<<< HEAD
-	signal.Notify(sig, os.Interrupt, os.Kill) // created 1 goroutine
-	log.Printf("server[%s] is closing with signal %v\n", s.Addr, <-sig)
-=======
+
 	signal.Notify(sig, os.Interrupt, os.Kill)
 	log4g.Info("server[%s] is closing with signal %v", s.Addr, <-sig)
->>>>>>> 8b42be2e3658e089bc1ca664c30993f1bba16430
+
 	for _, other := range others {
 		other.close()
 	}
 	s.close()
-<<<<<<< HEAD
 	close(sig)
 }
-=======
-}
->>>>>>> 8b42be2e3658e089bc1ca664c30993f1bba16430
