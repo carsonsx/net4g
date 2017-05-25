@@ -11,7 +11,7 @@ var NetConfig struct {
 	ProtobufIdSize     int
 }
 
-func init()  {
+func init() {
 	NetConfig.MessageLengthSize = 2
 	NetConfig.LittleEndian = false
 	NetConfig.HeartbeatFrequency = 10 * time.Second

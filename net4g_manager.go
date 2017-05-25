@@ -1,9 +1,9 @@
 package net4g
 
 import (
-	"log"
 	"sync"
 	"time"
+	"github.com/carsonsx/log4g"
 )
 
 const (
@@ -49,9 +49,7 @@ func (m *NetManager) Start() {
 			case t := <-heartbeatTimer.C:
 				for conn := range m.connections {
 					if t.UnixNano() > conn.Session().GetInt64(HEART_BEAT_LAST_TIME)+heartbeatTimeout.Nanoseconds() {
-						log.Println(t.UnixNano())
-						log.Println(conn.Session().GetInt64(HEART_BEAT_LAST_TIME))
-						log.Printf("client timeout: %s\n", conn.RemoteAddr().String())
+						log4g.Warn("client timeout: %s", conn.RemoteAddr().String())
 						delete(m.connections, conn)
 						conn.Close()
 					}
@@ -66,7 +64,7 @@ func (m *NetManager) Start() {
 				break outer
 			}
 		}
-		log.Println("ended manager gorutine")
+		log4g.Info("ended manager gorutine")
 		m.wg.Done()
 	}()
 }
@@ -116,5 +114,5 @@ func (m *NetManager) Close() {
 	close(m.removeChan)
 	close(m.broadcastChan)
 	close(m.closing)
-	log.Println("closed manager channels")
+	log4g.Info("closed manager channels")
 }

@@ -1,8 +1,8 @@
 package net4g
 
 import (
-	"net"
 	"github.com/carsonsx/net4g/util"
+	"net"
 )
 
 type NetSession interface {
@@ -26,7 +26,7 @@ type netSession struct {
 }
 
 func (s *netSession) GetString(key string, defaultValue ...string) string {
-	if value := s.map_data.Get(key); value != nil{
+	if value := s.map_data.Get(key); value != nil {
 		return value.(string)
 	} else if len(defaultValue) > 0 {
 		return defaultValue[0]
@@ -36,7 +36,7 @@ func (s *netSession) GetString(key string, defaultValue ...string) string {
 }
 
 func (s *netSession) GetInt(key string, defaultValue ...int) int {
-	if value := s.map_data.Get(key); value != nil{
+	if value := s.map_data.Get(key); value != nil {
 		return value.(int)
 	} else if len(defaultValue) > 0 {
 		return defaultValue[0]
@@ -46,7 +46,7 @@ func (s *netSession) GetInt(key string, defaultValue ...int) int {
 }
 
 func (s *netSession) GetInt64(key string, defaultValue ...int64) int64 {
-	if value := s.map_data.Get(key); value != nil{
+	if value := s.map_data.Get(key); value != nil {
 		return value.(int64)
 	} else if len(defaultValue) > 0 {
 		return defaultValue[0]
@@ -55,9 +55,8 @@ func (s *netSession) GetInt64(key string, defaultValue ...int64) int64 {
 	}
 }
 
-
 func (s *netSession) GetBool(key string, defaultValue ...bool) bool {
-	if value := s.map_data.Get(key); value != nil{
+	if value := s.map_data.Get(key); value != nil {
 		return value.(bool)
 	} else if len(defaultValue) > 0 {
 		return defaultValue[0]
@@ -66,12 +65,12 @@ func (s *netSession) GetBool(key string, defaultValue ...bool) bool {
 	}
 }
 
-func (s *netSession) SetValue(key string, value interface{}) ()  {
+func (s *netSession) SetValue(key string, value interface{}) {
 	s.map_data.Put(key, value)
 }
 
 func (s *netSession) GetValue(key string, defaultValue ...interface{}) interface{} {
-	if value := s.map_data.Get(key); value != nil{
+	if value := s.map_data.Get(key); value != nil {
 		return value
 	} else if len(defaultValue) > 0 {
 		return defaultValue[0]
@@ -80,15 +79,15 @@ func (s *netSession) GetValue(key string, defaultValue ...interface{}) interface
 	}
 }
 
-func (s *netSession) RemoveValue(key string) ()  {
+func (s *netSession) RemoveValue(key string) {
 	s.map_data.Remove(key)
 }
 
 type NetReq interface {
-	Bytes()      []byte
-	Msg()        interface{}
+	Bytes() []byte
+	Msg() interface{}
 	RemoteAddr() net.Addr
-	Session()    NetSession
+	Session() NetSession
 }
 
 func newNetReq(bytes []byte, msg interface{}, remoteAddr net.Addr, session NetSession) *netReq {
@@ -101,10 +100,10 @@ func newNetReq(bytes []byte, msg interface{}, remoteAddr net.Addr, session NetSe
 }
 
 type netReq struct {
-	bytes     []byte
+	bytes      []byte
 	msg        interface{}
 	remoteAddr net.Addr
-	session   NetSession
+	session    NetSession
 }
 
 func (req *netReq) Bytes() []byte {
@@ -122,7 +121,6 @@ func (req *netReq) RemoteAddr() net.Addr {
 func (req *netReq) Session() NetSession {
 	return req.session
 }
-
 
 type NetRes interface {
 	Write(v interface{}) error

@@ -1,13 +1,13 @@
 package net4g
 
 import (
-	"log"
+	"github.com/carsonsx/log4g"
 	"net"
-	"sync"
-	"time"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 )
 
 var Terminal = syscall.SIGTERM
@@ -54,7 +54,7 @@ func (c *tcpClient) Run() {
 
 	c.sig = make(chan os.Signal, 1)
 
-	log.Printf("connected to %s\n", netconn.RemoteAddr().String())
+	log4g.Info("connected to %s", netconn.RemoteAddr().String())
 	c.conn = NewNetConn(netconn)
 
 	// Init the connection manager
@@ -102,22 +102,22 @@ func (c *tcpClient) Write(v interface{}) error {
 }
 
 func (c *tcpClient) Close() {
-	log.Printf("client[%s] listener was closed", c.Addr)
+	log4g.Info("client[%s] listener was closed", c.Addr)
 	//close all connections
 	c.mgr.CloseConnections()
 	c.wg.Wait()
-	log.Printf("client[%s] manager was closed", c.Addr)
+	log4g.Info("client[%s] manager was closed", c.Addr)
 	c.mgr.Close()
 	for _, d := range c.dispatchers {
 		d.Close()
 	}
-	log.Printf("client[%s] closed", c.Addr)
+	log4g.Info("client[%s] closed", c.Addr)
 
 }
 
-func (c *tcpClient) Wait()  {
+func (c *tcpClient) Wait() {
 	signal.Notify(c.sig, os.Interrupt, os.Kill)
-	log.Printf("client[%s] is closing with signal %v\n", c.Addr, <-c.sig)
+	log4g.Info("client[%s] is closing with signal %v\n", c.Addr, <-c.sig)
 	c.closingBySignal = true
 	c.Close()
 

@@ -1,15 +1,15 @@
 package net4g
 
 import (
-	"log"
+	"fmt"
+	"github.com/carsonsx/log4g"
+	"github.com/carsonsx/net4g/util"
 	"net"
-	"sync"
 	"os"
 	"os/signal"
-	"time"
-	"fmt"
-	"github.com/carsonsx/net4g/util"
 	"runtime"
+	"sync"
+	"time"
 )
 
 func NewTcpServer(name, addr string, serializer ...Serializer) *tcpServer {
@@ -62,10 +62,10 @@ func (s *tcpServer) Start() *tcpServer {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("TCP server listening on %s", s.listener.Addr().String())
+	log4g.Info("TCP server listening on %s", s.listener.Addr().String())
 
 	// Init the connection manager
-	s.mgr = new (NetManager)
+	s.mgr = new(NetManager)
 	s.mgr.heartbeat = s.heartbeat
 	s.mgr.Start()
 
@@ -90,22 +90,24 @@ func (s *tcpServer) listen() {
 	maxDelay := time.Second
 
 	for {
-		log.Printf("total goroutine: %d", runtime.NumGoroutine())
+		if log4g.IsTrace() {
+			log4g.Info("total goroutine: %d", runtime.NumGoroutine())
+		}
 		netconn, err := s.listener.Accept()
 		if err != nil {
-			log.Println(err)
+			log4g.Error(err)
 			if neterr, ok := err.(net.Error); ok && neterr.Temporary() {
 				delay = util.SmartSleep(delay, maxDelay)
 				continue
 			}
 			break
 		}
-		log.Printf("accept connection from %s", netconn.RemoteAddr().String())
+		log4g.Info("accept connection from %s", netconn.RemoteAddr().String())
 		//new event
 		conn := NewNetConn(netconn)
 		s.mgr.Add(conn)
 		s.closeConn.Add(1)
-		go func() {// one connection, one goroutine to read
+		go func() { // one connection, one goroutine to read
 			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(nil, func(data []byte) {
 				if s.heartbeat && IsHeartbeatData(data) {
 					//log.Println("heartbeat callback")
@@ -117,41 +119,41 @@ func (s *tcpServer) listen() {
 			for _, d := range s.dispatchers {
 				d.CloseSession(conn.Session())
 			}
-			log.Printf("disconnected from %s", conn.RemoteAddr().String())
+			log4g.Info("disconnected from %s", conn.RemoteAddr().String())
 			s.closeConn.Done()
 		}()
 	}
 }
 
-func (s *tcpServer) close()  {
+func (s *tcpServer) close() {
 	//close listener
 	s.closeListen.Add(1)
 	s.listener.Close()
 	s.closeListen.Wait()
-	log.Printf("closed server[%s] listener", s.Addr)
+	log4g.Info("closed server[%s] listener", s.Addr)
 
 	//close all connections
 	s.mgr.CloseConnections()
-	log.Printf("closed server[%s] connections/readers", s.Addr)
+	log4g.Info("closed server[%s] connections/readers", s.Addr)
 	s.closeConn.Wait()
 
 	//close net manager
 	s.mgr.Close()
-	log.Printf("closed server[%s] manager", s.Addr)
+	log4g.Info("closed server[%s] manager", s.Addr)
 
 	//close dispatchers
 	for _, d := range s.dispatchers {
 		d.Close()
 	}
-	log.Printf("closed server[%s] dispatcher", s.Addr)
+	log4g.Info("closed server[%s] dispatcher", s.Addr)
 
-	log.Printf("closed server[%s]", s.Addr)
+	log4g.Info("closed server[%s]", s.Addr)
 }
 
-func (s *tcpServer) Wait(others ...*tcpServer)  {
+func (s *tcpServer) Wait(others ...*tcpServer) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, os.Kill)
-	log.Printf("server[%s] is closing with signal %v\n", s.Addr, <-sig)
+	log4g.Info("server[%s] is closing with signal %v", s.Addr, <-sig)
 	for _, other := range others {
 		other.close()
 	}

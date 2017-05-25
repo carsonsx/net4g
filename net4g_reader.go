@@ -11,11 +11,11 @@ func IsHeartbeatData(data []byte) bool {
 }
 
 type NetReader interface {
-	Read(before func (), after func (data []byte))
+	Read(before func(), after func(data []byte))
 }
 
-func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetManager) NetReader  {
-	reader := new (netReader)
+func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetManager) NetReader {
+	reader := new(netReader)
 	reader.conn = conn
 	reader.serializer = serializer
 	reader.dispatchers = dispatchers
@@ -30,7 +30,7 @@ type netReader struct {
 	mgr         *NetManager
 }
 
-func (r *netReader) Read(before func (), after func (data []byte))  {
+func (r *netReader) Read(before func(), after func(data []byte)) {
 
 	req := newNetReq(nil, nil, r.conn.RemoteAddr(), r.conn.Session())
 	res := newNetRes(r.conn, r.serializer)

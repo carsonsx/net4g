@@ -2,12 +2,12 @@ package net4g
 
 import (
 	"errors"
+	"github.com/carsonsx/log4g"
+	"github.com/carsonsx/net4g/util"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
-	"github.com/carsonsx/net4g/util"
 )
 
 type NetWriter interface {
@@ -57,7 +57,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 	_, err = io.ReadFull(c.conn, header)
 	if err != nil {
 		if err != io.EOF {
-			log.Println(err)
+			log4g.Error(err)
 		}
 		return
 	}
@@ -66,7 +66,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 	if msgLen > 0 {
 		_, err = io.ReadFull(c.conn, data)
 		if err != nil {
-			log.Println(err)
+			log4g.Error(err)
 			return
 		}
 	}
@@ -81,7 +81,7 @@ func (c *tcpNetConn) startWriting() {
 			pack := util.AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
 			_, err := c.conn.Write(pack)
 			if err != nil {
-				log.Println(err)
+				log4g.Error(err)
 			} else {
 				//log.Printf("writen: %v\n", data)
 			}
@@ -95,8 +95,8 @@ func (c *tcpNetConn) Write(p []byte) error {
 	if !c.closed {
 		c.writeChan <- p
 	} else {
-		text := "write failed: connection was closed"
-		log.Println(text)
+		text := "write to closed network connection"
+		log4g.Error(text)
 		return errors.New(text)
 	}
 	return nil
@@ -115,7 +115,7 @@ func (c *tcpNetConn) Close() {
 	close(c.writeChan)
 	err := c.conn.Close()
 	if err != nil {
-		log.Println(err)
+		log4g.Error(err)
 	}
 }
 

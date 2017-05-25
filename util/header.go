@@ -62,4 +62,3 @@ func GetIntHeader(data []byte, headerSize int, littleEndian bool) int64 {
 	}
 	return header
 }
-
