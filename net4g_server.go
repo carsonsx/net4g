@@ -90,7 +90,7 @@ func (s *tcpServer) listen() {
 	maxDelay := time.Second
 
 	for {
-		if log4g.IsTrace() {
+		if log4g.IsTraceEnabled() {
 			log4g.Info("total goroutine: %d", runtime.NumGoroutine())
 		}
 		netconn, err := s.listener.Accept()
