@@ -22,8 +22,9 @@ type NetManager struct {
 }
 
 type broadcastData struct {
-	data   []byte
-	filter func(session NetSession) bool
+	data    []byte
+	filter  func(session NetSession) bool
+	someone bool
 }
 
 func (m *NetManager) Start() {
@@ -58,6 +59,9 @@ func (m *NetManager) Start() {
 				for conn := range m.connections {
 					if bcData.filter == nil || bcData.filter(conn.Session()) {
 						conn.Write(bcData.data)
+						if bcData.someone {
+							break
+						}
 					}
 				}
 			case <-m.closing:
@@ -88,6 +92,14 @@ func (m *NetManager) Broadcast(data []byte, filter func(session NetSession) bool
 	bcData := new(broadcastData)
 	bcData.data = data
 	bcData.filter = filter
+	m.broadcastChan <- bcData
+}
+
+func (m *NetManager) Someone(data []byte, filter func(session NetSession) bool) {
+	bcData := new(broadcastData)
+	bcData.data = data
+	bcData.filter = filter
+	bcData.someone = true
 	m.broadcastChan <- bcData
 }
 

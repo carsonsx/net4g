@@ -33,7 +33,7 @@ type tcpClient struct {
 	heartbeatData   []byte
 	sig             chan os.Signal
 	closingBySignal bool
-	wg              sync.WaitGroup
+	closeConn              sync.WaitGroup
 }
 
 func (c *tcpClient) AddDispatchers(dispatchers ...*dispatcher) {
@@ -68,7 +68,7 @@ func (c *tcpClient) Run() {
 		if c.heartbeatData == nil {
 			c.heartbeatData = []byte{}
 		}
-		c.wg.Add(1)
+		c.closeConn.Add(1)
 		go func() {
 			for {
 				<-timer.C
@@ -76,21 +76,28 @@ func (c *tcpClient) Run() {
 					break
 				}
 			}
-			c.wg.Done()
+			c.closeConn.Done()
 			if !c.closingBySignal {
 				c.sig <- Terminal
 			}
 		}()
 	}
 
-	c.wg.Add(1)
+	c.closeConn.Add(1)
 	go func() {
-		newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(nil, nil)
+		newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(nil, func(data []byte) bool {
+			if IsHeartbeatData(data) {
+				log4g.Trace("heartbeat from server")
+				c.mgr.Heartbeat(c.conn)
+				return false
+			}
+			return true
+		})
 		c.mgr.Remove(c.conn)
 		for _, d := range c.dispatchers {
 			d.CloseSession(c.conn.Session())
 		}
-		c.wg.Done()
+		c.closeConn.Done()
 	}()
 }
 
@@ -102,16 +109,23 @@ func (c *tcpClient) Write(v interface{}) error {
 }
 
 func (c *tcpClient) Close() {
-	log4g.Info("client[%s] listener was closed", c.Addr)
+
 	//close all connections
 	c.mgr.CloseConnections()
-	c.wg.Wait()
-	log4g.Info("client[%s] manager was closed", c.Addr)
+	c.closeConn.Wait()
+	log4g.Info("closed client[%s] connections/readers", c.Addr)
+
+	//close net manager
 	c.mgr.Close()
+	log4g.Info("closed client[%s] manager", c.Addr)
+
+	//close dispatchers
 	for _, d := range c.dispatchers {
 		d.Close()
 	}
-	log4g.Info("client[%s] closed", c.Addr)
+	log4g.Info("closed client[%s] dispatcher", c.Addr)
+
+	log4g.Info("closed client[%s]", c.Addr)
 
 }
 

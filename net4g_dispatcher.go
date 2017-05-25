@@ -1,15 +1,19 @@
 package net4g
 
 import (
-	"github.com/carsonsx/log4g"
 	"reflect"
 	"sync"
+	"github.com/carsonsx/log4g"
 )
 
 func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes) {
 	for _, p := range dispatchers {
 		p.dispatchChan <- &dispatchData{req: req, res: res}
 	}
+}
+
+func AddHandler(dispatcher *dispatcher, v interface{}, h func(req NetReq, res NetRes))  {
+	dispatcher.AddHandler(h, reflect.TypeOf(v))
 }
 
 func NewDispatcher(name string) *dispatcher {
@@ -74,9 +78,10 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 
 	t := reflect.TypeOf(msg.req.Msg())
 	if h, ok := p.typeHandlers[t]; ok {
+		log4g.Trace("%v - found handler in dispatcher %s", t, p.Name)
 		h(msg.req, msg.res)
 	} else {
-		log4g.Trace("not found any handler for %v", t)
+		log4g.Trace("%v - not found any handler in dispatcher %s", t, p.Name)
 	}
 
 	for _, i := range p.after_interceptors {
@@ -136,6 +141,16 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error 
 		return err
 	}
 	p.mgr.BroadcastOthers(mySession, b)
+	return nil
+}
+
+func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool) error {
+	b, err := p.serializer.Serialize(v)
+	if err != nil {
+		log4g.Error(err)
+		return err
+	}
+	p.mgr.Someone(b, filter)
 	return nil
 }
 

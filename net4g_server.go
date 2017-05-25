@@ -108,11 +108,14 @@ func (s *tcpServer) listen() {
 		s.mgr.Add(conn)
 		s.closeConn.Add(1)
 		go func() { // one connection, one goroutine to read
-			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(nil, func(data []byte) {
-				if s.heartbeat && IsHeartbeatData(data) {
-					//log.Println("heartbeat callback")
+			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(nil, func(data []byte) bool {
+				if IsHeartbeatData(data) {
+					log4g.Trace("heartbeat from client")
+					s.mgr.Heartbeat(conn)
 					conn.Write(data) //write back heartbeat
+					return false
 				}
+				return true
 			})
 			//close event
 			s.mgr.Remove(conn)
@@ -134,8 +137,8 @@ func (s *tcpServer) close() {
 
 	//close all connections
 	s.mgr.CloseConnections()
-	log4g.Info("closed server[%s] connections/readers", s.Addr)
 	s.closeConn.Wait()
+	log4g.Info("closed server[%s] connections/readers", s.Addr)
 
 	//close net manager
 	s.mgr.Close()

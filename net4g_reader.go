@@ -4,14 +4,12 @@ import (
 	"bytes"
 )
 
-var heartBeatDataLen = len(NetConfig.HeartbeatData)
-
 func IsHeartbeatData(data []byte) bool {
-	return len(data) == heartBeatDataLen && bytes.Equal(data, NetConfig.HeartbeatData)
+	return len(data) == len(NetConfig.HeartbeatData) && bytes.Equal(data, NetConfig.HeartbeatData)
 }
 
 type NetReader interface {
-	Read(before func(), after func(data []byte))
+	Read(before func(), after func(data []byte) bool)
 }
 
 func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetManager) NetReader {
@@ -30,7 +28,7 @@ type netReader struct {
 	mgr         *NetManager
 }
 
-func (r *netReader) Read(before func(), after func(data []byte)) {
+func (r *netReader) Read(before func(), after func(data []byte) bool) {
 
 	req := newNetReq(nil, nil, r.conn.RemoteAddr(), r.conn.Session())
 	res := newNetRes(r.conn, r.serializer)
@@ -48,13 +46,9 @@ func (r *netReader) Read(before func(), after func(data []byte)) {
 		}
 
 		if after != nil {
-			after(data)
-		}
-
-		if IsHeartbeatData(data) {
-			//log.Println("heartbeat")
-			r.mgr.Heartbeat(r.conn)
-			continue
+			if !after(data) {
+				continue
+			}
 		}
 
 		v, err := r.serializer.Deserialize(data)

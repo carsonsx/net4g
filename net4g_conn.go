@@ -70,7 +70,9 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 			return
 		}
 	}
-	//log.Printf("read: %v\n", data)
+	if log4g.IsTraceEnabled() {
+		log4g.Trace("read: %v\n", data)
+	}
 	return
 }
 
@@ -83,7 +85,9 @@ func (c *tcpNetConn) startWriting() {
 			if err != nil {
 				log4g.Error(err)
 			} else {
-				//log.Printf("writen: %v\n", data)
+				if log4g.IsTraceEnabled() {
+					log4g.Trace("writen: %v\n", data)
+				}
 			}
 		}
 	}()
