@@ -13,4 +13,3 @@ func SmartSleep(d time.Duration, max time.Duration) time.Duration {
 	}
 	return d
 }
-

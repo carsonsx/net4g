@@ -40,7 +40,7 @@ func (m *unsafeMap) Remove(key interface{}) {
 }
 
 func (m *unsafeMap) ContainsKey(key interface{}) bool {
-	 _, ok := m.m[key]
+	_, ok := m.m[key]
 	return ok
 }
 
@@ -79,7 +79,7 @@ func newSafeMap(unsafeMap *unsafeMap) Map {
 }
 
 type safeMap struct {
-	m *unsafeMap
+	m       *unsafeMap
 	rwMutex sync.RWMutex
 }
 
@@ -130,4 +130,3 @@ func (m *safeMap) Clear() {
 	defer m.rwMutex.Unlock()
 	m.m.Clear()
 }
-
