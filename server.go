@@ -10,7 +10,10 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"syscall"
 )
+
+var Terminal os.Signal = syscall.SIGTERM
 
 func NewTcpServer(name, addr string, serializer ...Serializer) *tcpServer {
 	server := new(tcpServer)
@@ -156,7 +159,7 @@ func (s *tcpServer) close() {
 func (s *tcpServer) Wait(others ...*tcpServer) {
 	sig := make(chan os.Signal, 1)
 
-	signal.Notify(sig, os.Interrupt, os.Kill)
+	signal.Notify(sig, os.Interrupt, os.Kill, Terminal)
 	log4g.Info("server[%s] is closing with signal %v", s.Addr, <-sig)
 
 	for _, other := range others {

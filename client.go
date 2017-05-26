@@ -6,11 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 )
-
-var Terminal = syscall.SIGTERM
 
 func NewTcpClient(addr string, serializer ...Serializer) *tcpClient {
 	client := new(tcpClient)

@@ -18,7 +18,7 @@ type NetSession interface {
 
 func NewNetSession() NetSession {
 	s := new(netSession)
-	s.map_data = util.NewConcurrentMap()
+	s.map_data = util.NewSafeMap()
 	return s
 }
 

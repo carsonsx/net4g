@@ -64,11 +64,7 @@ func (m *unsafeMap) Clear() {
 	}
 }
 
-func SafeMap(m Map) Map {
-	return newSafeMap(m.(*unsafeMap))
-}
-
-func NewConcurrentMap() Map {
+func NewSafeMap() Map {
 	return newSafeMap(newUnsafeMap())
 }
 

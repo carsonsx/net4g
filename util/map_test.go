@@ -11,7 +11,7 @@ func TestMap(t *testing.T) {
 	m.Put("b", 2)
 	m.Put("c", 3)
 	doTestMap(m, t)
-	m = NewConcurrentMap()
+	m = NewSafeMap()
 	m.Put("a", 1)
 	m.Put("b", 2)
 	m.Put("c", 3)

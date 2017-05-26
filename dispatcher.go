@@ -68,6 +68,17 @@ func (p *dispatcher) SetCloseHandler(h func()) {
 }
 
 func (p *dispatcher) dispatch(msg *dispatchData) {
+
+	// safe the user handler to avoid the whole server down
+	defer func() {
+		if r := recover(); r != nil {
+			log4g.Error("********************* Handler Panic *********************")
+			log4g.Error(r)
+			msg.res.Close()
+			log4g.Error("********************* Handler Panic *********************")
+		}
+	}()
+
 	for _, i := range p.before_interceptors {
 		i(msg.req, msg.res)
 	}
@@ -78,10 +89,8 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 
 	t := reflect.TypeOf(msg.req.Msg())
 	if h, ok := p.typeHandlers[t]; ok {
-		log4g.Trace("%v - found handler in dispatcher %s", t, p.Name)
+		log4g.Trace("dispatcher[%s] is dispatching %v to handler ", p.Name, t)
 		h(msg.req, msg.res)
-	} else {
-		log4g.Trace("%v - not found any handler in dispatcher %s", t, p.Name)
 	}
 
 	for _, i := range p.after_interceptors {
