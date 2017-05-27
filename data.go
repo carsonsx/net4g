@@ -7,11 +7,11 @@ import (
 
 type NetSession interface {
 	Set(key string, value interface{})
+	Get(key string, defaultValue ...interface{}) interface{}
 	GetString(key string, defaultValue ...string) string
 	GetInt(key string, defaultValue ...int) int
 	GetInt64(key string, defaultValue ...int64) int64
 	GetBool(key string, defaultValue ...bool) bool
-	Get(key string, defaultValue ...interface{}) interface{}
 	Has(key string) bool
 	Remove(key string)
 }
@@ -24,6 +24,20 @@ func NewNetSession() NetSession {
 
 type netSession struct {
 	map_data util.Map
+}
+
+func (s *netSession) Set(key string, value interface{}) ()  {
+	s.map_data.Put(key, value)
+}
+
+func (s *netSession) Get(key string, defaultValue ...interface{}) interface{} {
+	if value := s.map_data.Get(key); value != nil {
+		return value
+	} else if len(defaultValue) > 0 {
+		return defaultValue[0]
+	} else {
+		return nil
+	}
 }
 
 func (s *netSession) GetString(key string, defaultValue ...string) string {
@@ -66,24 +80,9 @@ func (s *netSession) GetBool(key string, defaultValue ...bool) bool {
 	}
 }
 
-func (s *netSession) Set(key string, value interface{}) ()  {
-	s.map_data.Put(key, value)
-}
-
-func (s *netSession) Get(key string, defaultValue ...interface{}) interface{} {
-	if value := s.map_data.Get(key); value != nil {
-		return value
-	} else if len(defaultValue) > 0 {
-		return defaultValue[0]
-	} else {
-		return nil
-	}
-}
-
 func (s *netSession) Has(key string) bool {
-	return s.map_data.ContainsKey(key)
+	return s.map_data.Has(key)
 }
-
 
 func (s *netSession) Remove(key string) ()  {
 	s.map_data.Remove(key)

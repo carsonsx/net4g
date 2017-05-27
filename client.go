@@ -92,7 +92,7 @@ func (c *tcpClient) Run() {
 		})
 		c.mgr.Remove(c.conn)
 		for _, d := range c.dispatchers {
-			d.CloseSession(c.conn.Session())
+			d.handleConnectionClosed(c.conn.Session())
 		}
 		c.closeConn.Done()
 	}()
@@ -113,12 +113,12 @@ func (c *tcpClient) Close() {
 	log4g.Info("closed client[%s] connections/readers", c.Addr)
 
 	//close net manager
-	c.mgr.Close()
+	c.mgr.Destroy()
 	log4g.Info("closed client[%s] manager", c.Addr)
 
 	//close dispatchers
 	for _, d := range c.dispatchers {
-		d.Close()
+		d.Destroy()
 	}
 	log4g.Info("closed client[%s] dispatcher", c.Addr)
 

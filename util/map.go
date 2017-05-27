@@ -4,9 +4,9 @@ import "sync"
 
 type Map interface {
 	Put(key interface{}, value interface{})
-	Get(key interface{}) (value interface{})
+	Get(key interface{}, defaultValue ...interface{}) (value interface{})
 	Remove(key interface{})
-	ContainsKey(key interface{}) bool
+	Has(key interface{}) bool
 	Range(f func(key interface{}, value interface{}))
 	Size() int
 	IsEmpty() bool
@@ -31,15 +31,21 @@ func (m *unsafeMap) Put(key interface{}, value interface{}) {
 	m.m[key] = value
 }
 
-func (m *unsafeMap) Get(key interface{}) interface{} {
-	return m.m[key]
+func (m *unsafeMap) Get(key interface{}, defaultValue ...interface{}) interface{} {
+	value, ok := m.m[key]
+	if ok {
+		return value
+	} else if len(defaultValue) > 0 {
+		return defaultValue[0]
+	}
+	return nil
 }
 
 func (m *unsafeMap) Remove(key interface{}) {
 	delete(m.m, key)
 }
 
-func (m *unsafeMap) ContainsKey(key interface{}) bool {
+func (m *unsafeMap) Has(key interface{}) bool {
 	_, ok := m.m[key]
 	return ok
 }
@@ -85,10 +91,10 @@ func (m *safeMap) Put(key interface{}, value interface{}) {
 	m.m.Put(key, value)
 }
 
-func (m *safeMap) Get(key interface{}) interface{} {
+func (m *safeMap) Get(key interface{}, defaultValue ...interface{}) interface{} {
 	m.rwMutex.RLock()
 	defer m.rwMutex.RUnlock()
-	return m.m.Get(key)
+	return m.m.Get(key, defaultValue...)
 }
 
 func (m *safeMap) Remove(key interface{}) {
@@ -97,10 +103,10 @@ func (m *safeMap) Remove(key interface{}) {
 	m.m.Remove(key)
 }
 
-func (m *safeMap) ContainsKey(key interface{}) bool {
+func (m *safeMap) Has(key interface{}) bool {
 	m.rwMutex.RLock()
 	defer m.rwMutex.RUnlock()
-	return m.m.ContainsKey(key)
+	return m.m.Has(key)
 }
 
 func (m *safeMap) Range(f func(key interface{}, value interface{})) {

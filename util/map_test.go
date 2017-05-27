@@ -31,11 +31,11 @@ func doTestMap(m Map, t *testing.T) {
 	if m.Size() != 3 {
 		log4g.Fatal("expected 3, actual %v", m.Size())
 	}
-	if !m.ContainsKey("a") {
+	if !m.Has("a") {
 		log4g.Fatal("expected true, actual false")
 	}
 	m.Remove("a")
-	if m.ContainsKey("a") {
+	if m.Has("a") {
 		log4g.Fatal("expected false, actual true")
 	}
 	if m.Size() != 2 {

@@ -119,7 +119,7 @@ func (m *NetManager) CloseConnections() {
 	}
 }
 
-func (m *NetManager) Close() {
+func (m *NetManager) Destroy() {
 	m.closing <- true
 	m.wg.Wait()
 	close(m.addChan)

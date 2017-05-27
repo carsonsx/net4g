@@ -1,18 +1,21 @@
 package net4g
 
 import (
-	"reflect"
-	"sync"
 	"github.com/carsonsx/log4g"
+	"reflect"
+	"runtime/debug"
+	"sync"
 )
 
 func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes) {
 	for _, p := range dispatchers {
-		p.dispatchChan <- &dispatchData{req: req, res: res}
+		if p.running {
+			p.dispatchChan <- &dispatchData{req: req, res: res}
+		}
 	}
 }
 
-func AddHandler(dispatcher *dispatcher, v interface{}, h func(req NetReq, res NetRes))  {
+func AddHandler(dispatcher *dispatcher, v interface{}, h func(req NetReq, res NetRes)) {
 	dispatcher.AddHandler(h, reflect.TypeOf(v))
 }
 
@@ -20,8 +23,8 @@ func NewDispatcher(name string) *dispatcher {
 	p := new(dispatcher)
 	p.Name = name
 	p.dispatchChan = make(chan *dispatchData, 1000)
-	p.closeSessionChan = make(chan NetSession, 100)
-	p.closeChan = make(chan bool, 1)
+	p.sessionClosedChan = make(chan NetSession, 100)
+	p.destroyChan = make(chan bool, 1)
 	p.typeHandlers = make(map[reflect.Type]func(req NetReq, res NetRes))
 	p.run()
 	log4g.Info("new a %s dispatcher", name)
@@ -34,19 +37,20 @@ type dispatchData struct {
 }
 
 type dispatcher struct {
-	Name                string
-	serializer          Serializer
-	mgr                 *NetManager
-	globalHandlers      []func(req NetReq, res NetRes)
-	typeHandlers        map[reflect.Type]func(req NetReq, res NetRes)
-	before_interceptors []func(req NetReq, res NetRes)
-	after_interceptors  []func(req NetReq, res NetRes)
-	dispatchChan        chan *dispatchData
-	closeSessionChan    chan NetSession
-	closeSessionHandler func(session NetSession)
-	closeChan           chan bool
-	closeHandler        func()
-	wg                  sync.WaitGroup
+	Name                    string
+	serializer              Serializer
+	mgr                     *NetManager
+	globalHandlers          []func(req NetReq, res NetRes)
+	typeHandlers            map[reflect.Type]func(req NetReq, res NetRes)
+	before_interceptors     []func(req NetReq, res NetRes)
+	after_interceptors      []func(req NetReq, res NetRes)
+	dispatchChan            chan *dispatchData
+	sessionClosedChan       chan NetSession
+	connectionClosedHandler func(session NetSession)
+	destroyChan             chan bool
+	destroyHandler          func()
+	running                 bool
+	wg                      sync.WaitGroup
 }
 
 func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Type) {
@@ -59,12 +63,12 @@ func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Typ
 	}
 }
 
-func (p *dispatcher) SetCloseSessionHandler(h func(session NetSession)) {
-	p.closeSessionHandler = h
+func (p *dispatcher) OnConnectionClosed(h func(session NetSession)) {
+	p.connectionClosedHandler = h
 }
 
-func (p *dispatcher) SetCloseHandler(h func()) {
-	p.closeHandler = h
+func (p *dispatcher) OnDestroy(h func()) {
+	p.destroyHandler = h
 }
 
 func (p *dispatcher) dispatch(msg *dispatchData) {
@@ -74,6 +78,7 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 		if r := recover(); r != nil {
 			log4g.Error("********************* Handler Panic *********************")
 			log4g.Error(r)
+			debug.PrintStack()
 			msg.res.Close()
 			log4g.Error("********************* Handler Panic *********************")
 		}
@@ -102,25 +107,27 @@ func (p *dispatcher) run() {
 	p.wg.Add(1)
 	// one dispatcher, one goroutine
 	go func() {
+		defer p.wg.Done()
 	outer:
 		for {
 			select {
 			case data := <-p.dispatchChan:
 				p.dispatch(data)
-			case session := <-p.closeSessionChan:
-				if p.closeSessionHandler != nil {
-					p.closeSessionHandler(session)
+			case session := <-p.sessionClosedChan:
+				if p.connectionClosedHandler != nil {
+					p.connectionClosedHandler(session)
 				}
 				session.Get("wg").(*sync.WaitGroup).Done()
-			case <-p.closeChan:
-				if p.closeHandler != nil {
-					p.closeHandler()
+			case <-p.destroyChan:
+				if p.destroyHandler != nil {
+					p.destroyHandler()
 				}
 				break outer
 			}
 		}
-		p.wg.Done()
 	}()
+
+	p.running = true
 }
 
 func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool) error {
@@ -163,19 +170,21 @@ func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool
 	return nil
 }
 
-func (p *dispatcher) CloseSession(session NetSession) {
+func (p *dispatcher) handleConnectionClosed(session NetSession) {
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	session.Set("wg", wg)
-	p.closeSessionChan <- session
+	p.sessionClosedChan <- session
 	wg.Wait()
 	session.Remove("wg")
 }
 
-func (p *dispatcher) Close() {
-	p.closeChan <- true
+func (p *dispatcher) Destroy() {
+	p.running = false
+	p.destroyChan <- true
 	p.wg.Wait()
-	close(p.dispatchChan)
-	close(p.closeSessionChan)
-	close(p.closeChan)
+	//how to close gracefully
+	//close(p.dispatchChan)
+	//close(p.sessionClosedChan)
+	close(p.destroyChan)
 }

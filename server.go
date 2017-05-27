@@ -123,7 +123,7 @@ func (s *tcpServer) listen() {
 			//close event
 			s.mgr.Remove(conn)
 			for _, d := range s.dispatchers {
-				d.CloseSession(conn.Session())
+				d.handleConnectionClosed(conn.Session())
 			}
 			log4g.Info("disconnected from %s", conn.RemoteAddr().String())
 			s.closeConn.Done()
@@ -144,12 +144,12 @@ func (s *tcpServer) close() {
 	log4g.Info("closed server[%s] connections/readers", s.Addr)
 
 	//close net manager
-	s.mgr.Close()
+	s.mgr.Destroy()
 	log4g.Info("closed server[%s] manager", s.Addr)
 
 	//close dispatchers
 	for _, d := range s.dispatchers {
-		d.Close()
+		d.Destroy()
 	}
 	log4g.Info("closed server[%s] dispatcher", s.Addr)
 
