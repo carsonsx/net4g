@@ -78,7 +78,7 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 		if r := recover(); r != nil {
 			log4g.Error("********************* Handler Panic *********************")
 			log4g.Error(r)
-			debug.PrintStack()
+			log4g.Error(string(debug.Stack()))
 			msg.res.Close()
 			log4g.Error("********************* Handler Panic *********************")
 		}
