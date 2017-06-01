@@ -177,6 +177,9 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 	}
 
 	t := reflect.TypeOf(v)
+	if t == nil || t.Kind() != reflect.Ptr {
+		panic("value type must be a pointer")
+	}
 
 	if s.byId {
 		if id, ok := s.type_id_map[t]; ok {
@@ -282,6 +285,10 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 	}
 
 	t := reflect.TypeOf(v)
+	if t == nil || t.Kind() != reflect.Ptr {
+		panic("value type must be a pointer")
+	}
+
 	if id, ok := s.type_id_map[t]; ok {
 		data, err = proto.Marshal(v.(proto.Message))
 		if err != nil {
