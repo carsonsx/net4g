@@ -298,7 +298,7 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 		data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 		if log4g.IsDebugEnabled() {
 			bytes, _ := json.Marshal(v)
-			log4g.Debug("serialize %v - %v", t, string(bytes))
+			log4g.Trace("serialize %v - %v", t, string(bytes))
 		}
 	} else {
 		err = errors.New(fmt.Sprintf("%v is not registed by any id", t))
@@ -320,7 +320,7 @@ func (s *protobufSerializer) Deserialize(data []byte) (v interface{}, err error)
 			v = value
 			if log4g.IsDebugEnabled() {
 				bytes, _ := json.Marshal(v)
-				log4g.Debug("deserialize %v - %v", t, string(bytes))
+				log4g.Trace("deserialize %v - %v", t, string(bytes))
 			}
 		}
 	} else {
