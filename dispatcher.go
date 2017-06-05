@@ -187,11 +187,13 @@ func (p *dispatcher) handleConnectionClosed(session NetSession) {
 }
 
 func (p *dispatcher) Destroy() {
+	if p.running {
+		p.destroyChan <- true
+	}
 	p.running = false
-	p.destroyChan <- true
 	p.wg.Wait()
 	//how to close gracefully
 	//close(p.dispatchChan)
 	//close(p.sessionClosedChan)
-	close(p.destroyChan)
+	//close(p.destroyChan)
 }
