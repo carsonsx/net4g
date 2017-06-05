@@ -6,7 +6,6 @@ import (
 	"github.com/carsonsx/net4g/util"
 	"io"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -20,6 +19,7 @@ type NetConn interface {
 	Write(p []byte) error
 	Close()
 	Session() NetSession
+	FailedWriteData() [][]byte
 }
 
 func NewNetConn(conn net.Conn) NetConn {
@@ -34,6 +34,7 @@ func newTcpConn(conn net.Conn) *tcpNetConn {
 	tcp := new(tcpNetConn)
 	tcp.conn = conn
 	tcp.writeChan = make(chan []byte, 1000)
+	tcp.writeFailedChan = make(chan []byte, 10000)
 	tcp.session = NewNetSession()
 	tcp.startWriting()
 	return tcp
@@ -42,10 +43,10 @@ func newTcpConn(conn net.Conn) *tcpNetConn {
 type tcpNetConn struct {
 	conn       net.Conn
 	writeChan  chan []byte
+	writeFailedChan  chan []byte
 	readChan   chan []byte
 	closed     bool
 	session    NetSession
-	closeMutex sync.RWMutex
 }
 
 func (c *tcpNetConn) RemoteAddr() net.Addr {
@@ -71,7 +72,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 		}
 	}
 	if log4g.IsTraceEnabled() {
-		log4g.Trace("read: %v\n", data)
+		log4g.Trace("read: %v", data)
 	}
 	return
 }
@@ -79,14 +80,16 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 //one connection, one writer, goroutine safe
 func (c *tcpNetConn) startWriting() {
 	go func() {
-		for data := range c.writeChan {
+		for !c.closed {
+			data := <- c.writeChan
 			pack := util.AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
 			_, err := c.conn.Write(pack)
 			if err != nil {
 				log4g.Error(err)
+				c.writeFailedChan <- data
 			} else {
 				if log4g.IsTraceEnabled() {
-					log4g.Trace("writen: %v\n", data)
+					log4g.Trace("written: %v", data)
 				}
 			}
 		}
@@ -94,29 +97,41 @@ func (c *tcpNetConn) startWriting() {
 }
 
 func (c *tcpNetConn) Write(p []byte) error {
-	c.closeMutex.RLock()
-	defer c.closeMutex.RUnlock()
-	if !c.closed {
-		c.writeChan <- p
-	} else {
+	if c.closed {
 		text := "write to closed network connection"
 		log4g.Error(text)
+		c.writeFailedChan <- p
 		return errors.New(text)
+	} else {
+		c.writeChan <- p
 	}
 	return nil
+}
+
+
+func (c *tcpNetConn) FailedWriteData() [][]byte {
+	var data [][]byte
+	loop:
+	for {
+		select {
+		case d := <- c.writeFailedChan:
+			data = append(data, d)
+		default:
+			break loop
+		}
+	}
+	return data
 }
 
 func (c *tcpNetConn) Close() {
 	if c.closed {
 		return
 	}
-	c.closeMutex.Lock()
-	defer c.closeMutex.Unlock()
 	c.closed = true
 	for len(c.writeChan) > 0 {
 		time.Sleep(100)
 	}
-	close(c.writeChan)
+	//close(c.writeChan)
 	err := c.conn.Close()
 	if err != nil {
 		log4g.Error(err)

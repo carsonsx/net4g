@@ -8,10 +8,15 @@ import (
 )
 
 func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes) {
+	found := false
 	for _, p := range dispatchers {
 		if p.running {
 			p.dispatchChan <- &dispatchData{req: req, res: res}
+			found = true
 		}
+	}
+	if !found {
+		log4g.Warn("not found any running dispatcher")
 	}
 }
 
@@ -96,6 +101,8 @@ func (p *dispatcher) dispatch(msg *dispatchData) {
 	if h, ok := p.typeHandlers[t]; ok {
 		log4g.Trace("dispatcher[%s] is dispatching %v to handler ", p.Name, t)
 		h(msg.req, msg.res)
+	} else {
+		log4g.Trace("dispatcher[%s] not found any handler ", p.Name)
 	}
 
 	for _, i := range p.after_interceptors {

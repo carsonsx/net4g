@@ -230,7 +230,7 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 				log4g.Error(err)
 			} else {
 				v = value
-				log4g.Trace("rcvd %v - %s", t, string(data))
+				log4g.Trace("deserialized %v - %s", t, string(data))
 			}
 		} else {
 			err = errors.New(fmt.Sprintf("id[%d] is not registered by any type", id))
@@ -257,7 +257,7 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 					log4g.Error(err)
 				} else {
 					v = value
-					log4g.Trace("rcvd %v - %s", t, string(raw))
+					log4g.Trace("deserialized %v - %s", t, string(data))
 				}
 			} else {
 				err = errors.New(fmt.Sprintf("key '%s' is not registered by any type", key))

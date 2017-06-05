@@ -10,20 +10,14 @@ import (
 	"runtime"
 	"sync"
 	"time"
-	"syscall"
 )
 
-var Terminal os.Signal = syscall.SIGTERM
-
-func NewTcpServer(name, addr string, serializer ...Serializer) *tcpServer {
+func NewTcpServer(name, addr string) *tcpServer {
 	server := new(tcpServer)
 	server.Name = name
 	server.Addr = addr
-	if len(serializer) > 0 {
-		server.serializer = serializer[0]
-	} else {
-		server.serializer = NewEmptySerializer()
-	}
+	server.serializer = GlobalSerializer
+	server.dispatchers = append(server.dispatchers, ServerDispatcher)
 	return server
 }
 
@@ -39,6 +33,12 @@ type tcpServer struct {
 	closeConn   sync.WaitGroup
 	closeListen sync.WaitGroup
 	started     bool
+}
+
+
+func (s *tcpServer) SetSerializer(serializer Serializer) *tcpServer {
+	s.serializer = serializer
+	return s
 }
 
 func (s *tcpServer) AddDispatchers(dispatchers ...*dispatcher) *tcpServer {
@@ -131,7 +131,7 @@ func (s *tcpServer) listen() {
 	}
 }
 
-func (s *tcpServer) close() {
+func (s *tcpServer) Close() {
 	//close listener
 	s.closeListen.Add(1)
 	s.listener.Close()
@@ -156,15 +156,15 @@ func (s *tcpServer) close() {
 	log4g.Info("closed server[%s]", s.Addr)
 }
 
-func (s *tcpServer) Wait(others ...*tcpServer) {
+func (s *tcpServer) Wait(others ...Closer) {
 	sig := make(chan os.Signal, 1)
 
 	signal.Notify(sig, os.Interrupt, os.Kill, Terminal)
 	log4g.Info("server[%s] is closing with signal %v", s.Addr, <-sig)
 
 	for _, other := range others {
-		other.close()
+		other.Close()
 	}
-	s.close()
+	s.Close()
 	close(sig)
 }

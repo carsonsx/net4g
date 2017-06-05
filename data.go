@@ -149,8 +149,7 @@ func (res *netRes) Write(v interface{}) error {
 	if err != nil {
 		return err
 	}
-	res.conn.Write(data)
-	return nil
+	return res.conn.Write(data)
 }
 
 func (res *netRes) Close() {

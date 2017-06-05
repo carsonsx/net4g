@@ -9,56 +9,106 @@ import (
 	"time"
 )
 
-func NewTcpClient(addr string, serializer ...Serializer) *tcpClient {
-	client := new(tcpClient)
-	client.Addr = addr
-	if len(serializer) > 0 {
-		client.serializer = serializer[0]
-	} else {
-		client.serializer = NewEmptySerializer()
+const (
+	reconnect_delay_min = 100
+	reconnect_delay_max = 10000
+)
+
+func AddrFn(_addr string) func() (addr string, err error) {
+	return func() (addr string, err error) {
+		return _addr, nil
 	}
+}
+
+func NewTcpClient(addrFn func() (addr string, err error)) *TCPClient {
+	client := new(TCPClient)
+	client.addrFn = addrFn
+	client.serializer = GlobalSerializer
+	client.dispatchers = append(client.dispatchers, ClientDispatcher)
+	client.AutoReconnect = true
+	client.reconnectDelay = reconnect_delay_min
 	return client
 }
 
-type tcpClient struct {
-	Addr            string
-	conn            NetConn
-	serializer      Serializer
-	dispatchers     []*dispatcher
-	mgr             *NetManager
-	heartbeat       bool
-	heartbeatData   []byte
-	sig             chan os.Signal
-	closingBySignal bool
-	closeConn              sync.WaitGroup
+type TCPClient struct {
+	addrFn         func() (addr string, err error)
+	Addr           string
+	RemoteAddr     net.Addr
+	conn           NetConn
+	AutoReconnect  bool
+	reconnectDelay int
+	serializer     Serializer
+	dispatchers    []*dispatcher
+	mgr            *NetManager
+	heartbeat      bool
+	heartbeatData  []byte
+	sig            chan os.Signal
+	tryClose       bool
+	closeConn      sync.WaitGroup
+	connected      bool
 }
 
-func (c *tcpClient) AddDispatchers(dispatchers ...*dispatcher) {
+func (c *TCPClient) SetSerializer(serializer Serializer) *TCPClient {
+	c.serializer = serializer
+	return c
+}
+
+func (c *TCPClient) AddDispatchers(dispatchers ...*dispatcher) *TCPClient {
 	for _, d := range dispatchers {
 		c.dispatchers = append(c.dispatchers, d)
 	}
+	return c
 }
 
-func (c *tcpClient) EnableHeartbeat() {
+func (c *TCPClient) EnableHeartbeat() *TCPClient {
 	c.heartbeat = true
+	return c
 }
 
-func (c *tcpClient) Run() {
+func (c *TCPClient) DisableAutoReconnect() *TCPClient {
+	c.AutoReconnect = false
+	return c
+}
+
+func (c *TCPClient) connect() error {
+	var err error
+	c.Addr, err = c.addrFn()
+	if err != nil {
+		return err
+	}
 	netconn, err := net.Dial("tcp", c.Addr)
 	if err != nil {
-		panic(err)
+		log4g.Error(err)
+		return err
 	}
+	log4g.Info("connected to %s", netconn.RemoteAddr().String())
+	c.connected = true
+	c.reconnectDelay = reconnect_delay_min
+	conn := NewNetConn(netconn)
+	c.RemoteAddr = conn.RemoteAddr()
+	c.mgr.Add(conn)
+	if c.conn != nil {
+		failedData := c.conn.FailedWriteData()
+		if len(failedData) > 0 {
+			log4g.Info("found %d failed write data, will rewrite by new connection", len(failedData))
+		}
+		for _, data := range failedData {
+			conn.Write(data)
+		}
+	}
+	c.conn = conn
+	return nil
+}
+
+func (c *TCPClient) Run() *TCPClient {
+
 
 	c.sig = make(chan os.Signal, 1)
-
-	log4g.Info("connected to %s", netconn.RemoteAddr().String())
-	c.conn = NewNetConn(netconn)
 
 	// Init the connection manager
 	c.mgr = new(NetManager)
 	c.mgr.heartbeat = c.heartbeat
 	c.mgr.Start()
-	c.mgr.Add(c.conn)
 
 	if c.heartbeat {
 		timer := time.NewTicker(NetConfig.HeartbeatFrequency)
@@ -69,43 +119,75 @@ func (c *tcpClient) Run() {
 		go func() {
 			for {
 				<-timer.C
-				if c.conn.Write(c.heartbeatData) != nil {
-					break
+				if c.connected {
+					if c.conn.Write(c.heartbeatData) != nil {
+						log4g.Warn(c.tryClose)
+						log4g.Warn(c.AutoReconnect)
+						if c.tryClose || !c.AutoReconnect {
+							log4g.Info("end heartbeat")
+							break
+						}
+					}
 				}
 			}
 			c.closeConn.Done()
-			if !c.closingBySignal {
+			if !c.tryClose {
 				c.sig <- Terminal
 			}
 		}()
 	}
 
 	c.closeConn.Add(1)
+
 	go func() {
-		newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(nil, func(data []byte) bool {
-			if IsHeartbeatData(data) {
-				log4g.Trace("heartbeat from server")
-				c.mgr.Heartbeat(c.conn)
-				return false
+
+		for {
+
+			if c.connect() == nil {
+				newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(nil, func(data []byte) bool {
+					if IsHeartbeatData(data) {
+						log4g.Trace("heartbeat from server")
+						c.mgr.Heartbeat(c.conn)
+						return false
+					}
+					return true
+				})
+				c.mgr.Remove(c.conn)
+				c.connected = false
+				for _, d := range c.dispatchers {
+					d.handleConnectionClosed(c.conn.Session())
+				}
 			}
-			return true
-		})
-		c.mgr.Remove(c.conn)
-		for _, d := range c.dispatchers {
-			d.handleConnectionClosed(c.conn.Session())
+
+			if !c.tryClose && c.AutoReconnect {
+				log4g.Info("delay %d millisecond to AutoReconnect", c.reconnectDelay)
+				time.Sleep(time.Duration(c.reconnectDelay) * time.Millisecond)
+				c.reconnectDelay *= 2
+				if c.reconnectDelay > reconnect_delay_max {
+					c.reconnectDelay = reconnect_delay_max
+				}
+			} else {
+				log4g.Info("disconnected")
+				break
+			}
 		}
+
 		c.closeConn.Done()
 	}()
+
+	return c
 }
 
-func (c *tcpClient) Write(v interface{}) error {
+func (c *TCPClient) Write(v interface{}) error {
 	var res netRes
 	res.conn = c.conn
 	res.serializer = c.serializer
 	return res.Write(v)
 }
 
-func (c *tcpClient) Close() {
+func (c *TCPClient) Close() {
+
+	c.tryClose = true
 
 	//close all connections
 	c.mgr.CloseConnections()
@@ -126,10 +208,9 @@ func (c *tcpClient) Close() {
 
 }
 
-func (c *tcpClient) Wait() {
-	signal.Notify(c.sig, os.Interrupt, os.Kill)
+func (c *TCPClient) Wait() {
+	signal.Notify(c.sig, os.Interrupt, os.Kill, Terminal)
 	log4g.Info("client[%s] is closing with signal %v\n", c.Addr, <-c.sig)
-	c.closingBySignal = true
 	c.Close()
 
 }

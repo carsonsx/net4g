@@ -76,6 +76,7 @@ func (m *NetManager) Start() {
 func (m *NetManager) Add(conn NetConn) {
 	m.Heartbeat(conn)
 	m.connections[conn] = struct{}{}
+	log4g.Debug("connection count: %d", len(m.connections))
 }
 
 func (m *NetManager) Remove(conn NetConn) {
