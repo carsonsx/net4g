@@ -51,7 +51,7 @@ type dispatcher struct {
 	after_interceptors      []func(req NetReq, res NetRes)
 	dispatchChan            chan *dispatchData
 	sessionClosedChan       chan NetSession
-	connectionClosedHandler func(session NetSession)
+	connectionClosedHandlers []func(session NetSession)
 	destroyChan             chan bool
 	destroyHandler          func()
 	running                 bool
@@ -69,7 +69,7 @@ func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Typ
 }
 
 func (p *dispatcher) OnConnectionClosed(h func(session NetSession)) {
-	p.connectionClosedHandler = h
+	p.connectionClosedHandlers = append(p.connectionClosedHandlers, h)
 }
 
 func (p *dispatcher) OnDestroy(h func()) {
@@ -121,8 +121,10 @@ func (p *dispatcher) run() {
 			case data := <-p.dispatchChan:
 				p.dispatch(data)
 			case session := <-p.sessionClosedChan:
-				if p.connectionClosedHandler != nil {
-					p.connectionClosedHandler(session)
+				if len(p.connectionClosedHandlers) > 0 {
+					for _, h := range p.connectionClosedHandlers {
+						h(session)
+					}
 				}
 				session.Get("wg").(*sync.WaitGroup).Done()
 			case <-p.destroyChan:

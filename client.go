@@ -24,7 +24,7 @@ func NewTcpClient(addrFn func() (addr string, err error)) *TCPClient {
 	client := new(TCPClient)
 	client.addrFn = addrFn
 	client.serializer = GlobalSerializer
-	client.dispatchers = append(client.dispatchers, ClientDispatcher)
+	client.dispatchers = append(client.dispatchers, GlobalDispatcher)
 	client.AutoReconnect = true
 	client.reconnectDelay = reconnect_delay_min
 	return client

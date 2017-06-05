@@ -17,7 +17,7 @@ func NewTcpServer(name, addr string) *tcpServer {
 	server.Name = name
 	server.Addr = addr
 	server.serializer = GlobalSerializer
-	server.dispatchers = append(server.dispatchers, ServerDispatcher)
+	server.dispatchers = append(server.dispatchers, GlobalDispatcher)
 	return server
 }
 
