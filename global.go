@@ -7,11 +7,6 @@ import (
 
 var Terminal os.Signal = syscall.SIGTERM
 
-var GlobalSerializer Serializer = NewJsonSerializer()
-
-var GlobalDispatcher *dispatcher = NewDispatcher("net4g")
-
-
 type Closer interface {
 	Close()
 }

@@ -16,8 +16,6 @@ func NewTcpServer(name, addr string) *tcpServer {
 	server := new(tcpServer)
 	server.Name = name
 	server.Addr = addr
-	server.serializer = GlobalSerializer
-	server.dispatchers = append(server.dispatchers, GlobalDispatcher)
 	return server
 }
 
@@ -60,12 +58,19 @@ func (s *tcpServer) EnableHeartbeat() *tcpServer {
 }
 
 func (s *tcpServer) EnableStatusMonitor() *tcpServer {
-
 	s.statusMonitor = true
 	return s
 }
 
 func (s *tcpServer) Start() *tcpServer {
+
+	if s.serializer == nil {
+		panic("no serializer")
+	}
+
+	if len(s.dispatchers) == 0 {
+		panic("no dispatcher")
+	}
 
 	if s.statusMonitor {
 		go func() {

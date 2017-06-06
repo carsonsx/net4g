@@ -23,8 +23,6 @@ func AddrFn(_addr string) func() (addr string, err error) {
 func NewTcpClient(addrFn func() (addr string, err error)) *TCPClient {
 	client := new(TCPClient)
 	client.addrFn = addrFn
-	client.serializer = GlobalSerializer
-	client.dispatchers = append(client.dispatchers, GlobalDispatcher)
 	client.AutoReconnect = true
 	client.reconnectDelay = reconnect_delay_min
 	return client
@@ -100,8 +98,11 @@ func (c *TCPClient) connect() error {
 	return nil
 }
 
-func (c *TCPClient) Run() *TCPClient {
+func (c *TCPClient) Start() *TCPClient {
 
+	if c.serializer == nil {
+		c.serializer = NewJsonSerializer()
+	}
 
 	c.sig = make(chan os.Signal, 1)
 
@@ -139,11 +140,16 @@ func (c *TCPClient) Run() *TCPClient {
 
 	c.closeConn.Add(1)
 
+	var connectedWG sync.WaitGroup
+	connectedWG.Add(1)
 	go func() {
 
 		for {
 
 			if c.connect() == nil {
+
+				connectedWG.Done()
+
 				newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(func(data []byte) bool {
 					if IsHeartbeatData(data) {
 						log4g.Trace("heartbeat from server")
@@ -160,7 +166,7 @@ func (c *TCPClient) Run() *TCPClient {
 			}
 
 			if !c.tryClose && c.AutoReconnect {
-				log4g.Info("delay %d millisecond to AutoReconnect", c.reconnectDelay)
+				log4g.Info("delay %d millisecond to reconnect", c.reconnectDelay)
 				time.Sleep(time.Duration(c.reconnectDelay) * time.Millisecond)
 				c.reconnectDelay *= 2
 				if c.reconnectDelay > reconnect_delay_max {
@@ -173,7 +179,12 @@ func (c *TCPClient) Run() *TCPClient {
 		}
 
 		c.closeConn.Done()
+		if !c.tryClose {
+			c.sig <- Terminal
+		}
 	}()
+
+	connectedWG.Wait()
 
 	return c
 }

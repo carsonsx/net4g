@@ -61,10 +61,10 @@ type dispatcher struct {
 func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Type) {
 	if len(t) > 0 {
 		p.typeHandlers[t[0]] = h
-		log4g.Info("added a handler for %v", t[0])
+		log4g.Info("dispatcher[%s] added a handler for %v", p.Name, t[0])
 	} else {
 		p.globalHandlers = append(p.globalHandlers, h)
-		log4g.Info("added global handler")
+		log4g.Info("dispatcher[%s] added global handler", p.Name)
 	}
 }
 
