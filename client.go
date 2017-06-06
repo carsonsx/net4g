@@ -44,6 +44,7 @@ type TCPClient struct {
 	tryClose       bool
 	closeConn      sync.WaitGroup
 	connected      bool
+	connectedHandler    func (conn NetConn, client *TCPClient)
 }
 
 func (c *TCPClient) SetSerializer(serializer Serializer) *TCPClient {
@@ -65,6 +66,11 @@ func (c *TCPClient) EnableHeartbeat() *TCPClient {
 
 func (c *TCPClient) DisableAutoReconnect() *TCPClient {
 	c.AutoReconnect = false
+	return c
+}
+
+func (c *TCPClient) OnConnected(h func (conn NetConn, client *TCPClient)) *TCPClient {
+	c.connectedHandler = h
 	return c
 }
 
@@ -95,6 +101,11 @@ func (c *TCPClient) connect() error {
 		}
 	}
 	c.conn = conn
+
+	if c.connectedHandler != nil {
+		c.connectedHandler(conn, c)
+	}
+
 	return nil
 }
 
