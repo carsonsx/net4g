@@ -88,7 +88,7 @@ func (c *TCPClient) connect() error {
 	c.RemoteAddr = conn.RemoteAddr()
 	c.mgr.Add(conn)
 	if c.conn != nil {
-		failedData := c.conn.FailedWriteData()
+		failedData := c.conn.NotWrittenData()
 		if len(failedData) > 0 {
 			log4g.Info("found %d failed write data, will rewrite by new connection", len(failedData))
 		}
@@ -144,7 +144,7 @@ func (c *TCPClient) Run() *TCPClient {
 		for {
 
 			if c.connect() == nil {
-				newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(nil, func(data []byte) bool {
+				newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(func(data []byte) bool {
 					if IsHeartbeatData(data) {
 						log4g.Trace("heartbeat from server")
 						c.mgr.Heartbeat(c.conn)

@@ -33,6 +33,7 @@ type tcpServer struct {
 	closeConn   sync.WaitGroup
 	closeListen sync.WaitGroup
 	started     bool
+	statusMonitor bool
 }
 
 
@@ -58,7 +59,22 @@ func (s *tcpServer) EnableHeartbeat() *tcpServer {
 	return s
 }
 
+func (s *tcpServer) EnableStatusMonitor() *tcpServer {
+
+	s.statusMonitor = true
+	return s
+}
+
 func (s *tcpServer) Start() *tcpServer {
+
+	if s.statusMonitor {
+		go func() {
+			for {
+				time.Sleep(10 * time.Second)
+				log4g.Info("*[Server Status] goroutine  num: %d, connection num: %d", runtime.NumGoroutine(), len(s.mgr.connections))
+			}
+		}()
+	}
 
 	var err error
 	s.listener, err = net.Listen("tcp", s.Addr)
@@ -109,9 +125,11 @@ func (s *tcpServer) listen() {
 		//new event
 		conn := NewNetConn(netconn)
 		s.mgr.Add(conn)
-		s.closeConn.Add(1)
+
 		go func() { // one connection, one goroutine to read
-			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(nil, func(data []byte) bool {
+			s.closeConn.Add(1)
+			defer s.closeConn.Done()
+			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(func(data []byte) bool {
 				if IsHeartbeatData(data) {
 					log4g.Trace("heartbeat from client")
 					s.mgr.Heartbeat(conn)
@@ -126,7 +144,6 @@ func (s *tcpServer) listen() {
 				d.handleConnectionClosed(conn.Session())
 			}
 			log4g.Info("disconnected from %s", conn.RemoteAddr().String())
-			s.closeConn.Done()
 		}()
 	}
 }

@@ -2,6 +2,8 @@ package net4g
 
 import (
 	"bytes"
+	"github.com/carsonsx/log4g"
+	"runtime/debug"
 )
 
 func IsHeartbeatData(data []byte) bool {
@@ -9,7 +11,7 @@ func IsHeartbeatData(data []byte) bool {
 }
 
 type NetReader interface {
-	Read(before func(), after func(data []byte) bool)
+	Read(after func(data []byte) bool)
 }
 
 func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetManager) NetReader {
@@ -28,37 +30,42 @@ type netReader struct {
 	mgr         *NetManager
 }
 
-func (r *netReader) Read(before func(), after func(data []byte) bool) {
-
-	req := newNetReq(nil, nil, r.conn.RemoteAddr(), r.conn.Session())
-	res := newNetRes(r.conn, r.serializer)
-
+func (r *netReader) Read(after func(data []byte) bool) {
 	for {
-
-		if before != nil {
-			before()
-		}
-
 		data, err := r.conn.Read()
 		if err != nil {
 			r.conn.Close()
 			break
 		}
-
-		if after != nil {
-			if !after(data) {
-				continue
-			}
-		}
-
-		v, err := r.serializer.Deserialize(data)
-		if err != nil {
-			continue
-		}
-
-		req.bytes = data
-		req.msg = v
-
-		Dispatch(r.dispatchers, req, res)
+		r.read(data, after)
 	}
+}
+
+func (r *netReader) read(data []byte, after func(data []byte) bool) {
+
+	// safe the user handler to avoid the whole server down
+	defer func() {
+		if r := recover(); r != nil {
+			log4g.Error("********************* Reader Panic *********************")
+			log4g.Error(r)
+			log4g.Error(string(debug.Stack()))
+			log4g.Error("********************* Reader Panic *********************")
+		}
+	}()
+
+	if after != nil {
+		if !after(data) {
+			return
+		}
+	}
+
+	v, err := r.serializer.Deserialize(data)
+	if err != nil {
+		return
+	}
+
+	req := newNetReq(data, v, r.conn.RemoteAddr(), r.conn.Session())
+	res := newNetRes(r.conn, r.serializer)
+
+	Dispatch(r.dispatchers, req, res)
 }

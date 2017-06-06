@@ -76,37 +76,73 @@ func (p *dispatcher) OnDestroy(h func()) {
 	p.destroyHandler = h
 }
 
-func (p *dispatcher) dispatch(msg *dispatchData) {
+func (p *dispatcher) dispatch(dData *dispatchData) {
 
-	// safe the user handler to avoid the whole server down
 	defer func() {
 		if r := recover(); r != nil {
-			log4g.Error("********************* Handler Panic *********************")
+			log4g.Error("********************* Message Handler Panic *********************")
 			log4g.Error(r)
 			log4g.Error(string(debug.Stack()))
-			msg.res.Close()
-			log4g.Error("********************* Handler Panic *********************")
+			dData.res.Close()
+			log4g.Error("********************* Message Handler Panic *********************")
 		}
 	}()
 
 	for _, i := range p.before_interceptors {
-		i(msg.req, msg.res)
+		i(dData.req, dData.res)
 	}
 
 	for _, h := range p.globalHandlers {
-		h(msg.req, msg.res)
+		h(dData.req, dData.res)
 	}
 
-	t := reflect.TypeOf(msg.req.Msg())
+	t := reflect.TypeOf(dData.req.Msg())
 	if h, ok := p.typeHandlers[t]; ok {
 		log4g.Trace("dispatcher[%s] is dispatching %v to handler ", p.Name, t)
-		h(msg.req, msg.res)
+		h(dData.req, dData.res)
 	} else {
 		log4g.Trace("dispatcher[%s] not found any handler ", p.Name)
 	}
 
 	for _, i := range p.after_interceptors {
-		i(msg.req, msg.res)
+		i(dData.req, dData.res)
+	}
+}
+
+func (p *dispatcher) onConnectionClosedHandlers(session NetSession) {
+
+	defer session.Get("wg").(*sync.WaitGroup).Done()
+
+	defer func() {
+		if r := recover(); r != nil {
+			log4g.Error("********************* Close Handler Panic *********************")
+			log4g.Error(r)
+			log4g.Error(string(debug.Stack()))
+			log4g.Error("********************* Close Handler Panic *********************")
+		}
+	}()
+
+	if len(p.connectionClosedHandlers) > 0 {
+		for _, h := range p.connectionClosedHandlers {
+			h(session)
+		}
+	}
+}
+
+
+func (p *dispatcher) onDestroyHandler() {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log4g.Error("********************* Destroy Handler Panic *********************")
+			log4g.Error(r)
+			log4g.Error(string(debug.Stack()))
+			log4g.Error("********************* Destroy Handler Panic *********************")
+		}
+	}()
+
+	if p.destroyHandler != nil {
+		p.destroyHandler()
 	}
 }
 
@@ -118,25 +154,22 @@ func (p *dispatcher) run() {
 	outer:
 		for {
 			select {
+			case <-p.destroyChan:
+				p.onDestroyHandler()
+				break outer
 			case data := <-p.dispatchChan:
 				p.dispatch(data)
 			case session := <-p.sessionClosedChan:
-				if len(p.connectionClosedHandlers) > 0 {
-					for _, h := range p.connectionClosedHandlers {
-						h(session)
-					}
-				}
-				session.Get("wg").(*sync.WaitGroup).Done()
-			case <-p.destroyChan:
-				if p.destroyHandler != nil {
-					p.destroyHandler()
-				}
-				break outer
+				p.onConnectionClosedHandlers(session)
 			}
 		}
 	}()
 
 	p.running = true
+}
+
+func (p *dispatcher) Kick(filter func(session NetSession) bool) {
+	p.mgr.Kick(filter)
 }
 
 func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool) error {
@@ -180,12 +213,14 @@ func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool
 }
 
 func (p *dispatcher) handleConnectionClosed(session NetSession) {
+	log4g.Debug("handling closed session")
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	session.Set("wg", wg)
 	p.sessionClosedChan <- session
 	wg.Wait()
 	session.Remove("wg")
+	log4g.Debug("handled closed session")
 }
 
 func (p *dispatcher) Destroy() {

@@ -9,6 +9,7 @@ var NetConfig struct {
 	HeartbeatData      []byte
 	NetTolerableTime   time.Duration
 	MessageIdSize      int
+	KeepWriteData    bool
 }
 
 func init() {

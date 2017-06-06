@@ -16,22 +16,24 @@ type NetManager struct {
 	addChan            chan NetConn
 	removeChan         chan NetConn
 	heartbeat          bool
-	broadcastChan      chan *broadcastData
+	kickChan           chan func(session NetSession) bool
+	broadcastChan      chan *chanData
 	closing            chan bool
 	wg                 sync.WaitGroup
 }
 
-type broadcastData struct {
-	data    []byte
-	filter  func(session NetSession) bool
-	someone bool
+type chanData struct {
+	data   []byte
+	filter func(session NetSession) bool
+	once   bool
 }
 
 func (m *NetManager) Start() {
 	m.connections = make(map[NetConn]struct{})
 	m.addChan = make(chan NetConn, 100)
 	m.removeChan = make(chan NetConn, 100)
-	m.broadcastChan = make(chan *broadcastData, 1000)
+	m.kickChan = make(chan func(session NetSession) bool, 10)
+	m.broadcastChan = make(chan *chanData, 1000)
 	m.closing = make(chan bool, 1)
 	m.wg.Add(1)
 	go func() {
@@ -45,6 +47,18 @@ func (m *NetManager) Start() {
 			select {
 			case conn := <-m.addChan:
 				m.connections[conn] = struct{}{}
+				log4g.Debug("connection count: %d", len(m.connections))
+			case filter := <-m.kickChan:
+				if filter != nil {
+					for conn := range m.connections {
+						if filter(conn.Session()) {
+							conn.Close()
+							delete(m.connections, conn)
+							log4g.Warn("kicked connection %s", conn.RemoteAddr().String())
+							break
+						}
+					}
+				}
 			case conn := <-m.removeChan:
 				delete(m.connections, conn)
 			case t := <-heartbeatTimer.C:
@@ -55,11 +69,11 @@ func (m *NetManager) Start() {
 						conn.Close()
 					}
 				}
-			case bcData := <-m.broadcastChan:
+			case cData := <-m.broadcastChan:
 				for conn := range m.connections {
-					if bcData.filter == nil || bcData.filter(conn.Session()) {
-						conn.Write(bcData.data)
-						if bcData.someone {
+					if cData.filter == nil || cData.filter(conn.Session()) {
+						conn.Write(cData.data)
+						if cData.once {
 							break
 						}
 					}
@@ -75,8 +89,7 @@ func (m *NetManager) Start() {
 
 func (m *NetManager) Add(conn NetConn) {
 	m.Heartbeat(conn)
-	m.connections[conn] = struct{}{}
-	log4g.Debug("connection count: %d", len(m.connections))
+	m.addChan <- conn
 }
 
 func (m *NetManager) Remove(conn NetConn) {
@@ -89,19 +102,15 @@ func (m *NetManager) Heartbeat(conn NetConn) {
 	}
 }
 
-func (m *NetManager) Broadcast(data []byte, filter func(session NetSession) bool) {
-	bcData := new(broadcastData)
-	bcData.data = data
-	bcData.filter = filter
-	m.broadcastChan <- bcData
+func (m *NetManager) Kick(filter func(session NetSession) bool) {
+	m.kickChan <- filter
 }
 
-func (m *NetManager) Someone(data []byte, filter func(session NetSession) bool) {
-	bcData := new(broadcastData)
-	bcData.data = data
-	bcData.filter = filter
-	bcData.someone = true
-	m.broadcastChan <- bcData
+func (m *NetManager) Broadcast(data []byte, filter func(session NetSession) bool) {
+	cData := new(chanData)
+	cData.data = data
+	cData.filter = filter
+	m.broadcastChan <- cData
 }
 
 func (m *NetManager) BroadcastAll(data []byte) {
@@ -114,10 +123,21 @@ func (m *NetManager) BroadcastOthers(mySession NetSession, data []byte) {
 	})
 }
 
+func (m *NetManager) Someone(data []byte, filter func(session NetSession) bool) {
+	cData := new(chanData)
+	cData.data = data
+	cData.filter = filter
+	cData.once = true
+	m.broadcastChan <- cData
+}
+
+
+
 func (m *NetManager) CloseConnections() {
 	for conn := range m.connections {
 		conn.Close()
 	}
+	log4g.Debug("closed %d connections", len(m.connections))
 }
 
 func (m *NetManager) Destroy() {
@@ -127,5 +147,5 @@ func (m *NetManager) Destroy() {
 	close(m.removeChan)
 	close(m.broadcastChan)
 	close(m.closing)
-	log4g.Info("closed manager channels")
+	log4g.Info("closed net manager")
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/carsonsx/net4g/util"
 	"io"
 	"net"
-	"time"
+	"sync"
 )
 
 type NetWriter interface {
@@ -19,7 +19,7 @@ type NetConn interface {
 	Write(p []byte) error
 	Close()
 	Session() NetSession
-	FailedWriteData() [][]byte
+	NotWrittenData() [][]byte
 }
 
 func NewNetConn(conn net.Conn) NetConn {
@@ -33,20 +33,22 @@ func NewNetConn(conn net.Conn) NetConn {
 func newTcpConn(conn net.Conn) *tcpNetConn {
 	tcp := new(tcpNetConn)
 	tcp.conn = conn
-	tcp.writeChan = make(chan []byte, 1000)
-	tcp.writeFailedChan = make(chan []byte, 10000)
+	tcp.writeChan = make(chan []byte, 10000)
+	tcp.closeChan = make(chan bool)
 	tcp.session = NewNetSession()
 	tcp.startWriting()
 	return tcp
 }
 
 type tcpNetConn struct {
-	conn       net.Conn
-	writeChan  chan []byte
-	writeFailedChan  chan []byte
-	readChan   chan []byte
-	closed     bool
-	session    NetSession
+	conn            net.Conn
+	session         NetSession
+	writeChan       chan []byte
+	readChan        chan []byte
+	closeChan       chan bool
+	closed          bool
+	closeMutex      sync.Mutex
+	closeWG         sync.WaitGroup
 }
 
 func (c *tcpNetConn) RemoteAddr() net.Addr {
@@ -80,16 +82,26 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 //one connection, one writer, goroutine safe
 func (c *tcpNetConn) startWriting() {
 	go func() {
-		for !c.closed {
-			data := <- c.writeChan
-			pack := util.AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
-			_, err := c.conn.Write(pack)
-			if err != nil {
-				log4g.Error(err)
-				c.writeFailedChan <- data
-			} else {
-				if log4g.IsTraceEnabled() {
-					log4g.Trace("written: %v", data)
+		c.closeWG.Add(1)
+		defer c.closeWG.Done()
+	outer:
+		for {
+			select {
+			case <-c.closeChan:
+				break outer
+			case data := <-c.writeChan:
+				pack := util.AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
+				_, err := c.conn.Write(pack)
+				if err != nil {
+					log4g.Error(err)
+					if NetConfig.KeepWriteData {
+						c.writeChan <- data
+					}
+					break outer
+				} else {
+					if log4g.IsTraceEnabled() {
+						log4g.Trace("written: %v", data)
+					}
 				}
 			}
 		}
@@ -97,45 +109,50 @@ func (c *tcpNetConn) startWriting() {
 }
 
 func (c *tcpNetConn) Write(p []byte) error {
+	var err error
 	if c.closed {
 		text := "write to closed network connection"
-		log4g.Error(text)
-		c.writeFailedChan <- p
-		return errors.New(text)
+		//log4g.Error(text)
+		err = errors.New(text)
+		if NetConfig.KeepWriteData {
+			c.writeChan <- p
+		}
 	} else {
 		c.writeChan <- p
 	}
-	return nil
+
+	return err
 }
 
-
-func (c *tcpNetConn) FailedWriteData() [][]byte {
+func (c *tcpNetConn) NotWrittenData() [][]byte {
 	var data [][]byte
-	loop:
+outer:
 	for {
 		select {
-		case d := <- c.writeFailedChan:
+		case d := <-c.writeChan:
 			data = append(data, d)
 		default:
-			break loop
+			break outer
 		}
 	}
 	return data
 }
 
 func (c *tcpNetConn) Close() {
+	log4g.Debug("closing connection %s", c.RemoteAddr().String())
+	c.closeMutex.Lock()
+	defer c.closeMutex.Unlock()
 	if c.closed {
 		return
 	}
-	c.closed = true
-	for len(c.writeChan) > 0 {
-		time.Sleep(100)
-	}
-	//close(c.writeChan)
+	close(c.closeChan)
+	c.closeWG.Wait()
 	err := c.conn.Close()
 	if err != nil {
 		log4g.Error(err)
 	}
+	c.closed = true
+	log4g.Debug("closed connection %s", c.RemoteAddr().String())
 }
 
 func (c *tcpNetConn) Session() NetSession {
