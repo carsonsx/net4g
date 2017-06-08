@@ -12,6 +12,9 @@ import (
 const (
 	reconnect_delay_min = 100
 	reconnect_delay_max = 10000
+
+	CLIENT_MODE_BROADCAST = 1
+	CLIENT_MODE_BALANCE = 2
 )
 
 func AddrFn(_addr string) func() (addr string, err error) {
@@ -29,22 +32,21 @@ func NewTcpClient(addrFn func() (addr string, err error)) *TCPClient {
 }
 
 type TCPClient struct {
-	addrFn         func() (addr string, err error)
-	Addr           string
-	RemoteAddr     net.Addr
-	conn           NetConn
-	AutoReconnect  bool
-	reconnectDelay int
-	serializer     Serializer
-	dispatchers    []*dispatcher
-	mgr            *NetManager
-	heartbeat      bool
-	heartbeatData  []byte
-	sig            chan os.Signal
-	tryClose       bool
-	closeConn      sync.WaitGroup
-	connected      bool
-	connectedHandler    func (conn NetConn, client *TCPClient)
+	addrFn           func() (addr string, err error)
+	Addr             string
+	conn             *tcpNetConn
+	AutoReconnect    bool
+	reconnectDelay   int
+	serializer       Serializer
+	dispatchers      []*dispatcher
+	hub              *NetHub
+	heartbeat        bool
+	heartbeatData    []byte
+	sig              chan os.Signal
+	tryClose         bool
+	closeConn        sync.WaitGroup
+	connected        bool
+	connectedHandler func (conn NetConn, client *TCPClient)
 }
 
 func (c *TCPClient) SetSerializer(serializer Serializer) *TCPClient {
@@ -88,9 +90,8 @@ func (c *TCPClient) connect() error {
 	log4g.Info("connected to %s", netconn.RemoteAddr().String())
 	c.connected = true
 	c.reconnectDelay = reconnect_delay_min
-	conn := NewNetConn(netconn)
-	c.RemoteAddr = conn.RemoteAddr()
-	c.mgr.Add(conn)
+	conn := newTcpConn(netconn)
+	c.hub.Add(conn)
 	if c.conn != nil {
 		failedData := c.conn.NotWrittenData()
 		if len(failedData) > 0 {
@@ -118,9 +119,9 @@ func (c *TCPClient) Start() *TCPClient {
 	c.sig = make(chan os.Signal, 1)
 
 	// Init the connection manager
-	c.mgr = new(NetManager)
-	c.mgr.heartbeat = c.heartbeat
-	c.mgr.Start()
+	c.hub = new(NetHub)
+	c.hub.heartbeat = c.heartbeat
+	c.hub.Start()
 
 	if c.heartbeat {
 		timer := time.NewTicker(NetConfig.HeartbeatFrequency)
@@ -152,24 +153,21 @@ func (c *TCPClient) Start() *TCPClient {
 	c.closeConn.Add(1)
 
 	var connectedWG sync.WaitGroup
+
 	connectedWG.Add(1)
 	go func() {
-
 		for {
-
 			if c.connect() == nil {
-
 				connectedWG.Done()
-
-				newNetReader(c.conn, c.serializer, c.dispatchers, c.mgr).Read(func(data []byte) bool {
+				newNetReader(c.conn, c.serializer, c.dispatchers, c.hub).Read(func(data []byte) bool {
 					if IsHeartbeatData(data) {
 						log4g.Trace("heartbeat from server")
-						c.mgr.Heartbeat(c.conn)
+						c.hub.Heartbeat(c.conn)
 						return false
 					}
 					return true
 				})
-				c.mgr.Remove(c.conn)
+				c.hub.Remove(c.conn)
 				c.connected = false
 				for _, d := range c.dispatchers {
 					d.handleConnectionClosed(c.conn.Session())
@@ -183,6 +181,7 @@ func (c *TCPClient) Start() *TCPClient {
 				if c.reconnectDelay > reconnect_delay_max {
 					c.reconnectDelay = reconnect_delay_max
 				}
+				connectedWG.Add(1)
 			} else {
 				log4g.Info("disconnected")
 				break
@@ -201,10 +200,10 @@ func (c *TCPClient) Start() *TCPClient {
 }
 
 func (c *TCPClient) Write(v interface{}) error {
-	var res netRes
-	res.conn = c.conn
-	res.serializer = c.serializer
-	return res.Write(v)
+	var a netAgent
+	a.conn = c.conn
+	a.serializer = c.serializer
+	return a.Write(v)
 }
 
 func (c *TCPClient) Close() {
@@ -212,12 +211,12 @@ func (c *TCPClient) Close() {
 	c.tryClose = true
 
 	//close all connections
-	c.mgr.CloseConnections()
+	c.hub.CloseConnections()
 	c.closeConn.Wait()
 	log4g.Info("closed client[%s] connections/readers", c.Addr)
 
 	//close net manager
-	c.mgr.Destroy()
+	c.hub.Destroy()
 	log4g.Info("closed client[%s] manager", c.Addr)
 
 	//close dispatchers

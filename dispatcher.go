@@ -7,11 +7,11 @@ import (
 	"sync"
 )
 
-func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes) {
+func Dispatch(dispatchers []*dispatcher, agent NetAgent) {
 	found := false
 	for _, p := range dispatchers {
 		if p.running {
-			p.dispatchChan <- &dispatchData{req: req, res: res}
+			p.dispatchChan <- agent
 			found = true
 		}
 	}
@@ -20,45 +20,40 @@ func Dispatch(dispatchers []*dispatcher, req NetReq, res NetRes) {
 	}
 }
 
-func AddHandler(dispatcher *dispatcher, v interface{}, h func(req NetReq, res NetRes)) {
+func AddHandler(dispatcher *dispatcher, v interface{}, h func(agent NetAgent)) {
 	dispatcher.AddHandler(h, reflect.TypeOf(v))
 }
 
 func NewDispatcher(name string) *dispatcher {
 	p := new(dispatcher)
 	p.Name = name
-	p.dispatchChan = make(chan *dispatchData, 1000)
+	p.dispatchChan = make(chan NetAgent, 1000)
 	p.sessionClosedChan = make(chan NetSession, 100)
 	p.destroyChan = make(chan bool, 1)
-	p.typeHandlers = make(map[reflect.Type]func(req NetReq, res NetRes))
+	p.typeHandlers = make(map[reflect.Type]func(agent NetAgent))
 	p.run()
 	log4g.Info("new a %s dispatcher", name)
 	return p
 }
 
-type dispatchData struct {
-	req NetReq
-	res NetRes
-}
-
 type dispatcher struct {
-	Name                    string
-	serializer              Serializer
-	mgr                     *NetManager
-	globalHandlers          []func(req NetReq, res NetRes)
-	typeHandlers            map[reflect.Type]func(req NetReq, res NetRes)
-	before_interceptors     []func(req NetReq, res NetRes)
-	after_interceptors      []func(req NetReq, res NetRes)
-	dispatchChan            chan *dispatchData
-	sessionClosedChan       chan NetSession
+	Name                     string
+	serializer               Serializer
+	Hub                      *NetHub
+	globalHandlers           []func(agent NetAgent)
+	typeHandlers             map[reflect.Type]func(agent NetAgent)
+	before_interceptors      []func(agent NetAgent)
+	after_interceptors       []func(agent NetAgent)
+	dispatchChan             chan NetAgent
+	sessionClosedChan        chan NetSession
 	connectionClosedHandlers []func(session NetSession)
-	destroyChan             chan bool
-	destroyHandler          func()
-	running                 bool
-	wg                      sync.WaitGroup
+	destroyChan              chan bool
+	destroyHandler           func()
+	running                  bool
+	wg                       sync.WaitGroup
 }
 
-func (p *dispatcher) AddHandler(h func(req NetReq, res NetRes), t ...reflect.Type) {
+func (p *dispatcher) AddHandler(h func(agent NetAgent), t ...reflect.Type) {
 	if len(t) > 0 {
 		p.typeHandlers[t[0]] = h
 		log4g.Info("dispatcher[%s] added a handler for %v", p.Name, t[0])
@@ -76,36 +71,36 @@ func (p *dispatcher) OnDestroy(h func()) {
 	p.destroyHandler = h
 }
 
-func (p *dispatcher) dispatch(dData *dispatchData) {
+func (p *dispatcher) dispatch(agent NetAgent) {
 
 	defer func() {
 		if r := recover(); r != nil {
 			log4g.Error("********************* Message Handler Panic *********************")
 			log4g.Error(r)
 			log4g.Error(string(debug.Stack()))
-			dData.res.Close()
+			agent.Close()
 			log4g.Error("********************* Message Handler Panic *********************")
 		}
 	}()
 
 	for _, i := range p.before_interceptors {
-		i(dData.req, dData.res)
+		i(agent)
 	}
 
 	for _, h := range p.globalHandlers {
-		h(dData.req, dData.res)
+		h(agent)
 	}
 
-	t := reflect.TypeOf(dData.req.Msg())
+	t := reflect.TypeOf(agent.Msg())
 	if h, ok := p.typeHandlers[t]; ok {
 		log4g.Trace("dispatcher[%s] is dispatching %v to handler ", p.Name, t)
-		h(dData.req, dData.res)
+		h(agent)
 	} else {
 		log4g.Trace("dispatcher[%s] not found any handler ", p.Name)
 	}
 
 	for _, i := range p.after_interceptors {
-		i(dData.req, dData.res)
+		i(agent)
 	}
 }
 
@@ -169,7 +164,7 @@ func (p *dispatcher) run() {
 }
 
 func (p *dispatcher) Kick(filter func(session NetSession) bool) {
-	p.mgr.Kick(filter)
+	p.Hub.Kick(filter)
 }
 
 func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool) error {
@@ -178,7 +173,7 @@ func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bo
 		log4g.Error(err)
 		return err
 	}
-	p.mgr.Broadcast(b, filter)
+	p.Hub.Broadcast(b, filter)
 	return nil
 }
 
@@ -188,7 +183,7 @@ func (p *dispatcher) BroadcastAll(v interface{}) error {
 		log4g.Error(err)
 		return err
 	}
-	p.mgr.BroadcastAll(b)
+	p.Hub.BroadcastAll(b)
 	return nil
 }
 
@@ -198,7 +193,7 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error 
 		log4g.Error(err)
 		return err
 	}
-	p.mgr.BroadcastOthers(mySession, b)
+	p.Hub.BroadcastOthers(mySession, b)
 	return nil
 }
 
@@ -208,7 +203,27 @@ func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool
 		log4g.Error(err)
 		return err
 	}
-	p.mgr.Someone(b, filter)
+	p.Hub.Someone(b, filter)
+	return nil
+}
+
+func (p *dispatcher) SendToGroup(group string, v interface{}) error {
+	b, err := p.serializer.Serialize(v)
+	if err != nil {
+		log4g.Error(err)
+		return err
+	}
+	p.Hub.SendToGroup(group, b)
+	return nil
+}
+
+func (p *dispatcher) SendToGroupOne(group string, v interface{}) error {
+	b, err := p.serializer.Serialize(v)
+	if err != nil {
+		log4g.Error(err)
+		return err
+	}
+	p.Hub.SendToGroupOne(group, b)
 	return nil
 }
 

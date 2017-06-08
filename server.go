@@ -20,17 +20,17 @@ func NewTcpServer(name, addr string) *tcpServer {
 }
 
 type tcpServer struct {
-	Name        string
-	Addr        string
-	serializer  Serializer
-	dispatchers []*dispatcher
-	mutex       sync.Mutex
-	mgr         *NetManager
-	heartbeat   bool
-	listener    net.Listener
-	closeConn   sync.WaitGroup
-	closeListen sync.WaitGroup
-	started     bool
+	Name          string
+	Addr          string
+	serializer    Serializer
+	dispatchers   []*dispatcher
+	mutex         sync.Mutex
+	hub           *NetHub
+	heartbeat     bool
+	listener      net.Listener
+	closeConn     sync.WaitGroup
+	closeListen   sync.WaitGroup
+	started       bool
 	statusMonitor bool
 }
 
@@ -46,7 +46,7 @@ func (s *tcpServer) AddDispatchers(dispatchers ...*dispatcher) *tcpServer {
 			panic(fmt.Sprintf("dispatcher [%s] has bind with server [%s]", d.Name, s.Name))
 		}
 		d.serializer = s.serializer
-		d.mgr = s.mgr
+		d.Hub = s.hub
 		s.dispatchers = append(s.dispatchers, d)
 	}
 	return s
@@ -75,8 +75,8 @@ func (s *tcpServer) Start() *tcpServer {
 	if s.statusMonitor {
 		go func() {
 			for {
-				time.Sleep(10 * time.Second)
-				log4g.Info("*[Server Status] goroutine  num: %d, connection num: %d", runtime.NumGoroutine(), len(s.mgr.connections))
+				time.Sleep(180 * time.Second)
+				log4g.Info("*[Server Status] goroutine  num: %d, connection num: %d", runtime.NumGoroutine(), len(s.hub.connections))
 			}
 		}()
 	}
@@ -89,13 +89,13 @@ func (s *tcpServer) Start() *tcpServer {
 	log4g.Info("TCP server listening on %s", s.listener.Addr().String())
 
 	// Init the connection manager
-	s.mgr = new(NetManager)
-	s.mgr.heartbeat = s.heartbeat
-	s.mgr.Start()
+	s.hub = new(NetHub)
+	s.hub.heartbeat = s.heartbeat
+	s.hub.Start()
 
 	for _, d := range s.dispatchers {
 		d.serializer = s.serializer
-		d.mgr = s.mgr
+		d.Hub = s.hub
 	}
 
 	go func() {
@@ -128,23 +128,23 @@ func (s *tcpServer) listen() {
 		}
 		log4g.Info("accept connection from %s", netconn.RemoteAddr().String())
 		//new event
-		conn := NewNetConn(netconn)
-		s.mgr.Add(conn)
+		conn := newTcpConn(netconn)
+		s.hub.Add(conn)
 
 		go func() { // one connection, one goroutine to read
 			s.closeConn.Add(1)
 			defer s.closeConn.Done()
-			newNetReader(conn, s.serializer, s.dispatchers, s.mgr).Read(func(data []byte) bool {
+			newNetReader(conn, s.serializer, s.dispatchers, s.hub).Read(func(data []byte) bool {
 				if IsHeartbeatData(data) {
 					log4g.Trace("heartbeat from client")
-					s.mgr.Heartbeat(conn)
+					s.hub.Heartbeat(conn)
 					conn.Write(data) //write back heartbeat
 					return false
 				}
 				return true
 			})
 			//close event
-			s.mgr.Remove(conn)
+			s.hub.Remove(conn)
 			for _, d := range s.dispatchers {
 				d.handleConnectionClosed(conn.Session())
 			}
@@ -161,12 +161,12 @@ func (s *tcpServer) Close() {
 	log4g.Info("closed server[%s] listener", s.Addr)
 
 	//close all connections
-	s.mgr.CloseConnections()
+	s.hub.CloseConnections()
 	s.closeConn.Wait()
 	log4g.Info("closed server[%s] connections/readers", s.Addr)
 
 	//close net manager
-	s.mgr.Destroy()
+	s.hub.Destroy()
 	log4g.Info("closed server[%s] manager", s.Addr)
 
 	//close dispatchers

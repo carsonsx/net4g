@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"github.com/carsonsx/log4g"
 	"runtime/debug"
+	"time"
 )
 
 func IsHeartbeatData(data []byte) bool {
@@ -14,7 +15,7 @@ type NetReader interface {
 	Read(after func(data []byte) bool)
 }
 
-func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetManager) NetReader {
+func newNetReader(conn *tcpNetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetHub) NetReader {
 	reader := new(netReader)
 	reader.conn = conn
 	reader.serializer = serializer
@@ -24,10 +25,10 @@ func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher
 }
 
 type netReader struct {
-	conn        NetConn
+	conn        *tcpNetConn
 	serializer  Serializer
 	dispatchers []*dispatcher
-	mgr         *NetManager
+	mgr         *NetHub
 }
 
 func (r *netReader) Read(after func(data []byte) bool) {
@@ -37,11 +38,12 @@ func (r *netReader) Read(after func(data []byte) bool) {
 			r.conn.Close()
 			break
 		}
-		r.read(data, after)
+		r.conn.lastReadTime = time.Now()
+		r.process(data, after)
 	}
 }
 
-func (r *netReader) read(data []byte, after func(data []byte) bool) {
+func (r *netReader) process(data []byte, after func(data []byte) bool) {
 
 	// safe the user handler to avoid the whole server down
 	defer func() {
@@ -64,8 +66,5 @@ func (r *netReader) read(data []byte, after func(data []byte) bool) {
 		return
 	}
 
-	req := newNetReq(data, v, r.conn.RemoteAddr(), r.conn.Session())
-	res := newNetRes(r.conn, r.serializer)
-
-	Dispatch(r.dispatchers, req, res)
+	Dispatch(r.dispatchers, newNetAgent(r.conn, data, v, r.conn.RemoteAddr(), r.conn.Session(), r.serializer))
 }

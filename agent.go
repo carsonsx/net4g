@@ -88,70 +88,64 @@ func (s *netSession) Remove(key string) ()  {
 	s.map_data.Remove(key)
 }
 
-type NetReq interface {
+type NetAgent interface {
+	Conn() NetConn
 	Bytes() []byte
 	Msg() interface{}
 	RemoteAddr() net.Addr
 	Session() NetSession
-}
-
-func newNetReq(bytes []byte, msg interface{}, remoteAddr net.Addr, session NetSession) *netReq {
-	req := new(netReq)
-	req.bytes = bytes
-	req.msg = msg
-	req.remoteAddr = remoteAddr
-	req.session = session
-	return req
-}
-
-type netReq struct {
-	bytes      []byte
-	msg        interface{}
-	remoteAddr net.Addr
-	session    NetSession
-}
-
-func (req *netReq) Bytes() []byte {
-	return req.bytes
-}
-
-func (req *netReq) Msg() interface{} {
-	return req.msg
-}
-
-func (req *netReq) RemoteAddr() net.Addr {
-	return req.remoteAddr
-}
-
-func (req *netReq) Session() NetSession {
-	return req.session
-}
-
-type NetRes interface {
 	Write(v interface{}) error
 	Close()
 }
 
-func newNetRes(conn NetConn, serializer Serializer) *netRes {
-	res := new(netRes)
-	res.conn = conn
-	res.serializer = serializer
-	return res
+func newNetAgent(conn NetConn, bytes []byte, msg interface{}, remoteAddr net.Addr, session NetSession, serializer Serializer) *netAgent {
+	agent := new(netAgent)
+	agent.conn = conn
+	agent.bytes = bytes
+	agent.msg = msg
+	agent.remoteAddr = remoteAddr
+	agent.session = session
+	agent.serializer = serializer
+	return agent
 }
 
-type netRes struct {
+type netAgent struct {
 	conn       NetConn
+	bytes      []byte
+	msg        interface{}
+	remoteAddr net.Addr
+	session    NetSession
 	serializer Serializer
 }
 
-func (res *netRes) Write(v interface{}) error {
-	data, err := res.serializer.Serialize(v)
+func (a *netAgent) Conn() NetConn {
+	return a.conn
+}
+
+func (a *netAgent) Bytes() []byte {
+	return a.bytes
+}
+
+func (a *netAgent) Msg() interface{} {
+	return a.msg
+}
+
+func (a *netAgent) RemoteAddr() net.Addr {
+	return a.remoteAddr
+}
+
+func (a *netAgent) Session() NetSession {
+	return a.session
+}
+
+func (a *netAgent) Write(v interface{}) error {
+	data, err := a.serializer.Serialize(v)
 	if err != nil {
 		return err
 	}
-	return res.conn.Write(data)
+	return a.conn.Write(data)
 }
 
-func (res *netRes) Close() {
-	res.conn.Close()
+func (a *netAgent) Close() {
+	a.conn.Close()
 }

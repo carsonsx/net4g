@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 type NetWriter interface {
@@ -17,22 +18,18 @@ type NetConn interface {
 	RemoteAddr() net.Addr
 	Read() (p []byte, err error)
 	Write(p []byte) error
-	Close()
 	Session() NetSession
+	Close()
 	NotWrittenData() [][]byte
-}
-
-func NewNetConn(conn net.Conn) NetConn {
-	if conn.RemoteAddr().Network() == "tcp" {
-		return newTcpConn(conn)
-	} else {
-		panic("invalid connection name")
-	}
+	EstablishTime() time.Time
+	LastReadTime() time.Time
+	LastWriteTime() time.Time
 }
 
 func newTcpConn(conn net.Conn) *tcpNetConn {
 	tcp := new(tcpNetConn)
 	tcp.conn = conn
+	tcp.establishTime = time.Now()
 	tcp.writeChan = make(chan []byte, 10000)
 	tcp.closeChan = make(chan bool)
 	tcp.session = NewNetSession()
@@ -49,10 +46,27 @@ type tcpNetConn struct {
 	closed          bool
 	closeMutex      sync.Mutex
 	closeWG         sync.WaitGroup
+	establishTime   time.Time
+	lastReadTime    time.Time
+	lastWriteTime   time.Time
 }
 
 func (c *tcpNetConn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
+}
+
+func (c *tcpNetConn) EstablishTime() time.Time {
+	return c.establishTime
+}
+
+
+func (c *tcpNetConn) LastReadTime() time.Time {
+	return c.lastReadTime
+}
+
+
+func (c *tcpNetConn) LastWriteTime() time.Time {
+	return c.lastWriteTime
 }
 
 func (c *tcpNetConn) Read() (data []byte, err error) {
@@ -75,6 +89,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 	}
 	if log4g.IsTraceEnabled() {
 		log4g.Trace("read: %v", data)
+		//log4g.Trace("read: %v", string(data))
 	}
 	return
 }
@@ -99,6 +114,7 @@ func (c *tcpNetConn) startWriting() {
 					}
 					break outer
 				} else {
+					c.lastWriteTime = time.Now()
 					if log4g.IsTraceEnabled() {
 						log4g.Trace("written: %v", data)
 					}

@@ -19,11 +19,11 @@ func (lb *RoundRobinLoadBalance) Select() string {
 	if lb.size == 0 {
 		return ""
 	}
-	client := lb.selects[lb.round]
-	lb.round++
 	if lb.round >= lb.size {
 		lb.round = 0
 	}
+	client := lb.selects[lb.round]
+	lb.round++
 	return client
 }
 
@@ -33,12 +33,10 @@ func (lb *RoundRobinLoadBalance) Remove(sel string) {
 	for i, v := range lb.selects {
 		if v == sel {
 			lb.selects = append(lb.selects[:i], lb.selects[i+1:]...)
+			break
 		}
 	}
 	lb.size = len(lb.selects)
-	if lb.round >= lb.size {
-		lb.round = 0
-	}
 }
 
 func (lb *RoundRobinLoadBalance) Start(seedFunc func() ([]string, error),  duration time.Duration) {
@@ -62,10 +60,6 @@ func (lb *RoundRobinLoadBalance) refresh() {
 	if err == nil {
 		lb.selects = selects
 		lb.size = len(lb.selects)
-		if lb.round >= lb.size {
-			lb.round = 0
-		}
-		//log4g.Info("selects: %v, round: %d", lb.selects, lb.round)
 	}
 }
 

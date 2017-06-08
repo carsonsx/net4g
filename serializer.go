@@ -190,6 +190,7 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 			}
 			data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 			if log4g.IsTraceEnabled() {
+				log4g.Trace("serializing %v - %v", t, v)
 				log4g.Trace("serialized %v - %s", t, string(data))
 			}
 		} else {
