@@ -12,18 +12,9 @@ import (
 const (
 	reconnect_delay_min = 100
 	reconnect_delay_max = 10000
-
-	CLIENT_MODE_BROADCAST = 1
-	CLIENT_MODE_BALANCE = 2
 )
 
-func AddrFn(_addr string) func() (addr string, err error) {
-	return func() (addr string, err error) {
-		return _addr, nil
-	}
-}
-
-func NewTcpClient(addrFn func() (addr string, err error)) *TCPClient {
+func NewTcpClient(addrFn func() (addrs []*NetAddr, err error)) *TCPClient {
 	client := new(TCPClient)
 	client.addrFn = addrFn
 	client.AutoReconnect = true
@@ -32,9 +23,8 @@ func NewTcpClient(addrFn func() (addr string, err error)) *TCPClient {
 }
 
 type TCPClient struct {
-	addrFn           func() (addr string, err error)
+	addrFn           func() (addrs []*NetAddr, err error)
 	Addr             string
-	conn             *tcpNetConn
 	AutoReconnect    bool
 	reconnectDelay   int
 	serializer       Serializer
@@ -43,7 +33,7 @@ type TCPClient struct {
 	heartbeat        bool
 	heartbeatData    []byte
 	sig              chan os.Signal
-	tryClose         bool
+	closed           bool
 	closeConn        sync.WaitGroup
 	connected        bool
 	connectedHandler func (conn NetConn, client *TCPClient)
@@ -134,9 +124,9 @@ func (c *TCPClient) Start() *TCPClient {
 				<-timer.C
 				if c.connected {
 					if c.conn.Write(c.heartbeatData) != nil {
-						log4g.Warn(c.tryClose)
+						log4g.Warn(c.closed)
 						log4g.Warn(c.AutoReconnect)
-						if c.tryClose || !c.AutoReconnect {
+						if c.closed || !c.AutoReconnect {
 							log4g.Info("end heartbeat")
 							break
 						}
@@ -144,7 +134,7 @@ func (c *TCPClient) Start() *TCPClient {
 				}
 			}
 			c.closeConn.Done()
-			if !c.tryClose {
+			if !c.closed {
 				c.sig <- Terminal
 			}
 		}()
@@ -155,8 +145,11 @@ func (c *TCPClient) Start() *TCPClient {
 	var connectedWG sync.WaitGroup
 
 	connectedWG.Add(1)
+
 	go func() {
+
 		for {
+
 			if c.connect() == nil {
 				connectedWG.Done()
 				newNetReader(c.conn, c.serializer, c.dispatchers, c.hub).Read(func(data []byte) bool {
@@ -174,26 +167,29 @@ func (c *TCPClient) Start() *TCPClient {
 				}
 			}
 
-			if !c.tryClose && c.AutoReconnect {
-				log4g.Info("delay %d millisecond to reconnect", c.reconnectDelay)
-				time.Sleep(time.Duration(c.reconnectDelay) * time.Millisecond)
-				c.reconnectDelay *= 2
-				if c.reconnectDelay > reconnect_delay_max {
-					c.reconnectDelay = reconnect_delay_max
-				}
-				connectedWG.Add(1)
-			} else {
+			if c.closed || !c.AutoReconnect {
 				log4g.Info("disconnected")
 				break
 			}
+
+			log4g.Info("delay %d millisecond to reconnect", c.reconnectDelay)
+			time.Sleep(time.Duration(c.reconnectDelay) * time.Millisecond)
+			c.reconnectDelay *= 2
+			if c.reconnectDelay > reconnect_delay_max {
+				c.reconnectDelay = reconnect_delay_max
+			}
+
+			connectedWG.Add(1)
 		}
 
 		c.closeConn.Done()
-		if !c.tryClose {
+
+		if !c.closed {
 			c.sig <- Terminal
 		}
 	}()
 
+	// for first connection
 	connectedWG.Wait()
 
 	return c
@@ -208,16 +204,16 @@ func (c *TCPClient) Write(v interface{}) error {
 
 func (c *TCPClient) Close() {
 
-	c.tryClose = true
+	c.closed = true
 
 	//close all connections
 	c.hub.CloseConnections()
 	c.closeConn.Wait()
-	log4g.Info("closed client[%s] connections/readers", c.Addr)
+	log4g.Info("closed client[%s] connections", c.Addr)
 
-	//close net manager
+	//close net hub
 	c.hub.Destroy()
-	log4g.Info("closed client[%s] manager", c.Addr)
+	log4g.Info("closed client[%s] hub", c.Addr)
 
 	//close dispatchers
 	for _, d := range c.dispatchers {
