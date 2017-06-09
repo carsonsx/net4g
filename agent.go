@@ -90,17 +90,19 @@ func (s *netSession) Remove(key string) ()  {
 
 type NetAgent interface {
 	Conn() NetConn
+	Prefix() []byte
 	Bytes() []byte
 	Msg() interface{}
 	RemoteAddr() net.Addr
 	Session() NetSession
-	Write(v interface{}) error
+	Write(v interface{}, prefix ...byte) error
 	Close()
 }
 
-func newNetAgent(conn NetConn, bytes []byte, msg interface{}, remoteAddr net.Addr, session NetSession, serializer Serializer) *netAgent {
+func newNetAgent(conn NetConn, prefix, bytes []byte, msg interface{}, remoteAddr net.Addr, session NetSession, serializer Serializer) *netAgent {
 	agent := new(netAgent)
 	agent.conn = conn
+	agent.prefix = prefix
 	agent.bytes = bytes
 	agent.msg = msg
 	agent.remoteAddr = remoteAddr
@@ -111,6 +113,7 @@ func newNetAgent(conn NetConn, bytes []byte, msg interface{}, remoteAddr net.Add
 
 type netAgent struct {
 	conn       NetConn
+	prefix      []byte
 	bytes      []byte
 	msg        interface{}
 	remoteAddr net.Addr
@@ -120,6 +123,10 @@ type netAgent struct {
 
 func (a *netAgent) Conn() NetConn {
 	return a.conn
+}
+
+func (a *netAgent) Prefix() []byte {
+	return a.prefix
 }
 
 func (a *netAgent) Bytes() []byte {
@@ -138,8 +145,8 @@ func (a *netAgent) Session() NetSession {
 	return a.session
 }
 
-func (a *netAgent) Write(v interface{}) error {
-	data, err := a.serializer.Serialize(v)
+func (a *netAgent) Write(v interface{}, prefix ...byte) error {
+	data, err := Serialize(a.serializer, v, prefix...)
 	if err != nil {
 		return err
 	}

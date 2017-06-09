@@ -6,6 +6,7 @@ type Map interface {
 	Put(key interface{}, value interface{})
 	Get(key interface{}, defaultValue ...interface{}) (value interface{})
 	Remove(key interface{})
+	Pick(key interface{}, defaultValue ...interface{}) (value interface{})
 	Has(key interface{}) bool
 	Range(f func(key interface{}, value interface{}))
 	Size() int
@@ -43,6 +44,17 @@ func (m *unsafeMap) Get(key interface{}, defaultValue ...interface{}) interface{
 
 func (m *unsafeMap) Remove(key interface{}) {
 	delete(m.m, key)
+}
+
+func (m *unsafeMap) Pick(key interface{}, defaultValue ...interface{}) interface{} {
+	value, ok := m.m[key]
+	if ok {
+		delete(m.m, key)
+		return value
+	} else if len(defaultValue) > 0 {
+		return defaultValue[0]
+	}
+	return nil
 }
 
 func (m *unsafeMap) Has(key interface{}) bool {
@@ -95,6 +107,12 @@ func (m *safeMap) Get(key interface{}, defaultValue ...interface{}) interface{} 
 	m.rwMutex.RLock()
 	defer m.rwMutex.RUnlock()
 	return m.m.Get(key, defaultValue...)
+}
+
+func (m *safeMap) Pick(key interface{}, defaultValue ...interface{}) interface{} {
+	m.rwMutex.Lock()
+	defer m.rwMutex.Unlock()
+	return m.m.Pick(key, defaultValue...)
 }
 
 func (m *safeMap) Remove(key interface{}) {

@@ -10,12 +10,20 @@ import (
 	"reflect"
 )
 
+func Serialize(serializer Serializer, v interface{}, prefix ...byte) (data []byte, err error) {
+	data, err = serializer.Serialize(v)
+	if len(prefix) > 0 {
+		data = append(prefix, data...)
+	}
+	return
+}
+
 type Serializer interface {
 	SetIdStartingValue(id int)
 	RegisterById(t reflect.Type, id_at_most_one ...int) (id int, err error)
 	RegisterByKey(t reflect.Type, key_at_most_one ...string) (key string, err error)
 	Serialize(v interface{}) (data []byte, err error)
-	Deserialize(data []byte) (v interface{}, err error)
+	Deserialize(raw []byte) (v interface{}, data []byte, err error)
 	RangeId(f func(id int, t reflect.Type))
 	RangeKey(f func(key string, t reflect.Type))
 }
@@ -118,8 +126,8 @@ func (s *emptySerializer) Serialize(v interface{}) (data []byte, err error) {
 	return v.([]byte), nil
 }
 
-func (s *emptySerializer) Deserialize(data []byte) (v interface{}, err error) {
-	return data, nil
+func (s *emptySerializer) Deserialize(raw []byte) (v interface{}, data []byte, err error) {
+	return raw, raw, nil
 }
 
 func (s *emptySerializer) RangeId(f func(id int, t reflect.Type)) {
@@ -148,21 +156,27 @@ func newEmptySerializer() *emptySerializer {
 	return s
 }
 
-type stringSerializer struct {
-	Serializer
+func NewStringSerializer() Serializer {
+	s := new(stringSerializer)
+	s.emptySerializer = newEmptySerializer()
+	return s
 }
 
-func (s *stringSerializer) Serialize(v interface{}) (data []byte, err error) {
+type stringSerializer struct {
+	*emptySerializer
+}
+
+func (s *stringSerializer) Serialize(v interface{}) (raw []byte, err error) {
 	return []byte(v.(string)), nil
 }
 
-func (s *stringSerializer) Deserialize(data []byte) (v interface{}, err error) {
-	return string(data), nil
+func (s *stringSerializer) Deserialize(raw []byte) (v interface{}, data []byte, err error) {
+	return string(raw), raw, nil
 }
 
-func NewStringSerializer() Serializer {
-	s := new(stringSerializer)
-	s.Serializer = newEmptySerializer()
+func NewJsonSerializer() Serializer {
+	s := new(jsonSerializer)
+	s.emptySerializer = newEmptySerializer()
 	return s
 }
 
@@ -183,10 +197,12 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 
 	if s.byId {
 		if id, ok := s.type_id_map[t]; ok {
-			data, err = json.Marshal(v)
-			if err != nil {
-				log4g.Error(err)
-				return
+			if v != nil {
+				data, err = json.Marshal(v)
+				if err != nil {
+					log4g.Error(err)
+					return
+				}
 			}
 			data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 			if log4g.IsTraceEnabled() {
@@ -216,17 +232,29 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 	return
 }
 
-func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
+func (s *jsonSerializer) Deserialize(raw []byte) (v interface{}, data []byte, err error) {
 
 	if !s.registered {
 		panic("not registered any id or key")
 	}
 
 	if s.byId {
-		id := int(util.GetIntHeader(data, NetConfig.MessageIdSize, NetConfig.LittleEndian))
+
+		if len(raw) < NetConfig.MessageIdSize {
+			text := fmt.Sprintf("message length [%d] is short than id size [%d]", len(raw), NetConfig.MessageIdSize)
+			err = errors.New(text)
+			log4g.Error(err)
+			return
+		}
+
+		id := int(util.GetIntHeader(raw, NetConfig.MessageIdSize, NetConfig.LittleEndian))
 		if t, ok := s.id_type_map[id]; ok {
+			data = raw[NetConfig.MessageIdSize:]
+			if len(data) == 0 {
+				return
+			}
 			value := reflect.New(t.Elem()).Interface()
-			err = json.Unmarshal(data[NetConfig.MessageIdSize:], value)
+			err = json.Unmarshal(data, value)
 			if err != nil {
 				log4g.Error(err)
 			} else {
@@ -239,18 +267,21 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 		}
 	} else {
 		var m_raw map[string]json.RawMessage
-		err = json.Unmarshal(data, &m_raw)
+		err = json.Unmarshal(raw, &m_raw)
 		if err != nil {
 			log4g.Error(err)
-			return nil, err
+			return
 		}
 		if len(m_raw) == 0 {
-			text := fmt.Sprintf("invalid json: %v", string(data))
-			log4g.Error(text)
+			text := fmt.Sprintf("invalid json: %v", string(raw))
 			err = errors.New(text)
+			log4g.Error(err)
 			return
 		}
 		for key, raw := range m_raw {
+			if len(raw) == 0 {
+				break
+			}
 			if t, ok := s.key_type_map[key]; ok {
 				value := reflect.New(t.Elem()).Interface()
 				err = json.Unmarshal(raw, value)
@@ -258,7 +289,8 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 					log4g.Error(err)
 				} else {
 					v = value
-					log4g.Trace("deserialized %v - %s", t, string(data))
+					log4g.Trace("deserialized %v - %s", t, string(raw))
+					break
 				}
 			} else {
 				err = errors.New(fmt.Sprintf("key '%s' is not registered by any type", key))
@@ -269,8 +301,8 @@ func (s *jsonSerializer) Deserialize(data []byte) (v interface{}, err error) {
 	return
 }
 
-func NewJsonSerializer() Serializer {
-	s := new(jsonSerializer)
+func NewProtobufSerializer() Serializer {
+	s := new(protobufSerializer)
 	s.emptySerializer = newEmptySerializer()
 	return s
 }
@@ -291,10 +323,12 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 	}
 
 	if id, ok := s.type_id_map[t]; ok {
-		data, err = proto.Marshal(v.(proto.Message))
-		if err != nil {
-			log4g.Error(err)
-			return
+		if v != nil {
+			data, err = proto.Marshal(v.(proto.Message))
+			if err != nil {
+				log4g.Error(err)
+				return
+			}
 		}
 		data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 		if log4g.IsDebugEnabled() {
@@ -304,17 +338,30 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 	} else {
 		err = errors.New(fmt.Sprintf("%v is not registed by any id", t))
 	}
+
 	return
 }
 
-func (s *protobufSerializer) Deserialize(data []byte) (v interface{}, err error) {
+func (s *protobufSerializer) Deserialize(raw []byte) (v interface{}, data []byte, err error) {
 	if !s.registered {
 		log4g.Panic("not registered any id")
 	}
-	id := int(util.GetIntHeader(data, NetConfig.MessageIdSize, NetConfig.LittleEndian))
+
+	if len(raw) < NetConfig.MessageIdSize {
+		text := fmt.Sprintf("message length [%d] is short than id size [%d]", len(raw), NetConfig.MessageIdSize)
+		err = errors.New(text)
+		log4g.Error(err)
+		return
+	}
+
+	id := int(util.GetIntHeader(raw, NetConfig.MessageIdSize, NetConfig.LittleEndian))
 	if t, ok := s.id_type_map[id]; ok {
+		data = raw[NetConfig.MessageIdSize:]
+		if len(data) == 0 {
+			return
+		}
 		value := reflect.New(t.Elem()).Interface()
-		err = proto.UnmarshalMerge(data[NetConfig.MessageIdSize:], value.(proto.Message))
+		err = proto.UnmarshalMerge(data, value.(proto.Message))
 		if err != nil {
 			log4g.Error(err)
 		} else {
@@ -329,10 +376,4 @@ func (s *protobufSerializer) Deserialize(data []byte) (v interface{}, err error)
 		log4g.Error(err)
 	}
 	return
-}
-
-func NewProtobufSerializer() Serializer {
-	s := new(protobufSerializer)
-	s.emptySerializer = newEmptySerializer()
-	return s
 }

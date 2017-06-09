@@ -5,6 +5,7 @@ import (
 	"github.com/carsonsx/log4g"
 	"runtime/debug"
 	"time"
+	"fmt"
 )
 
 func IsHeartbeatData(data []byte) bool {
@@ -43,7 +44,7 @@ func (r *netReader) Read(after func(data []byte) bool) {
 	}
 }
 
-func (r *netReader) process(data []byte, after func(data []byte) bool) {
+func (r *netReader) process(raw []byte, after func(data []byte) bool) {
 
 	// safe the user handler to avoid the whole server down
 	defer func() {
@@ -56,15 +57,27 @@ func (r *netReader) process(data []byte, after func(data []byte) bool) {
 	}()
 
 	if after != nil {
-		if !after(data) {
+		if !after(raw) {
 			return
 		}
 	}
 
-	v, err := r.serializer.Deserialize(data)
+	var prefix []byte
+
+	if NetConfig.MessagePrefixSize > 0 {
+		if len(raw) < NetConfig.MessagePrefixSize {
+			text := fmt.Sprintf("message length [%d] is short than prefix size [%d]", len(raw), NetConfig.MessagePrefixSize)
+			log4g.Error(text)
+			return
+		}
+		prefix = raw[:NetConfig.MessagePrefixSize]
+		raw = raw[NetConfig.MessagePrefixSize:]
+	}
+
+	v, data, err := r.serializer.Deserialize(raw)
 	if err != nil {
 		return
 	}
 
-	Dispatch(r.dispatchers, newNetAgent(r.conn, data, v, r.conn.RemoteAddr(), r.conn.Session(), r.serializer))
+	Dispatch(r.dispatchers, newNetAgent(r.conn, prefix, data, v, r.conn.RemoteAddr(), r.conn.Session(), r.serializer))
 }
