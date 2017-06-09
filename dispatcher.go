@@ -24,13 +24,14 @@ func AddHandler(dispatcher *dispatcher, v interface{}, h func(agent NetAgent)) {
 	dispatcher.AddHandler(h, reflect.TypeOf(v))
 }
 
-func NewDispatcher(name string) *dispatcher {
+func NewDispatcher(name string, goroutineNum int) *dispatcher {
 	p := new(dispatcher)
 	p.Name = name
 	p.dispatchChan = make(chan NetAgent, 1000)
 	p.sessionClosedChan = make(chan NetSession, 100)
 	p.destroyChan = make(chan bool, 1)
 	p.typeHandlers = make(map[reflect.Type]func(agent NetAgent))
+	p.goroutineNum = goroutineNum
 	p.run()
 	log4g.Info("new a %s dispatcher", name)
 	return p
@@ -49,6 +50,7 @@ type dispatcher struct {
 	connectionClosedHandlers []func(session NetSession)
 	destroyChan              chan bool
 	destroyHandler           func()
+	goroutineNum             int
 	running                  bool
 	wg                       sync.WaitGroup
 }
@@ -124,7 +126,6 @@ func (p *dispatcher) onConnectionClosedHandlers(session NetSession) {
 	}
 }
 
-
 func (p *dispatcher) onDestroyHandler() {
 
 	defer func() {
@@ -142,8 +143,8 @@ func (p *dispatcher) onDestroyHandler() {
 }
 
 func (p *dispatcher) run() {
-	p.wg.Add(1)
-	// one dispatcher, one goroutine
+	p.wg.Add(p.goroutineNum)
+
 	go func() {
 		defer p.wg.Done()
 	outer:
@@ -160,6 +161,22 @@ func (p *dispatcher) run() {
 		}
 	}()
 
+	for i := 0; i < p.goroutineNum - 1; i++ {
+		go func() {
+			defer p.wg.Done()
+		outer:
+			for {
+				select {
+				case <-p.destroyChan:
+					p.onDestroyHandler()
+					break outer
+				case data := <-p.dispatchChan:
+					p.dispatch(data)
+				}
+			}
+		}()
+	}
+
 	p.running = true
 }
 
@@ -167,8 +184,8 @@ func (p *dispatcher) Kick(filter func(session NetSession) bool) {
 	p.Hub.Kick(filter)
 }
 
-func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool) error {
-	b, err := p.serializer.Serialize(v)
+func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool, prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
@@ -177,8 +194,8 @@ func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bo
 	return nil
 }
 
-func (p *dispatcher) BroadcastAll(v interface{}) error {
-	b, err := p.serializer.Serialize(v)
+func (p *dispatcher) BroadcastAll(v interface{}, prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
@@ -187,8 +204,8 @@ func (p *dispatcher) BroadcastAll(v interface{}) error {
 	return nil
 }
 
-func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error {
-	b, err := p.serializer.Serialize(v)
+func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}, prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
@@ -197,8 +214,8 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}) error 
 	return nil
 }
 
-func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool) error {
-	b, err := p.serializer.Serialize(v)
+func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool, prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
@@ -207,8 +224,8 @@ func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool
 	return nil
 }
 
-func (p *dispatcher) SendToGroup(group string, v interface{}) error {
-	b, err := p.serializer.Serialize(v)
+func (p *dispatcher) SendToGroup(group string, v interface{}, prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
@@ -217,13 +234,13 @@ func (p *dispatcher) SendToGroup(group string, v interface{}) error {
 	return nil
 }
 
-func (p *dispatcher) SendToGroupOne(group string, v interface{}) error {
-	b, err := p.serializer.Serialize(v)
+func (p *dispatcher) SendToGroupOne(group string, v interface{}, errFunc func(error), prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.SendToGroupOne(group, b)
+	p.Hub.SendToGroupOne(group, b, errFunc)
 	return nil
 }
 
@@ -240,7 +257,9 @@ func (p *dispatcher) handleConnectionClosed(session NetSession) {
 
 func (p *dispatcher) Destroy() {
 	if p.running {
-		p.destroyChan <- true
+		for i := 0; i < p.goroutineNum; i++ {
+			p.destroyChan <- true
+		}
 	}
 	p.running = false
 	p.wg.Wait()
