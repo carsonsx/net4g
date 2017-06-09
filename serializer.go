@@ -197,12 +197,10 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 
 	if s.byId {
 		if id, ok := s.type_id_map[t]; ok {
-			if v != nil {
-				data, err = json.Marshal(v)
-				if err != nil {
-					log4g.Error(err)
-					return
-				}
+			data, err = json.Marshal(v)
+			if err != nil {
+				log4g.Error(err)
+				return
 			}
 			data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 			if log4g.IsTraceEnabled() {
@@ -323,12 +321,10 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 	}
 
 	if id, ok := s.type_id_map[t]; ok {
-		if v != nil {
-			data, err = proto.Marshal(v.(proto.Message))
-			if err != nil {
-				log4g.Error(err)
-				return
-			}
+		data, err = proto.Marshal(v.(proto.Message))
+		if err != nil {
+			log4g.Error(err)
+			return
 		}
 		data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 		if log4g.IsDebugEnabled() {
