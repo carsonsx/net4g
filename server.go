@@ -129,7 +129,10 @@ func (s *tcpServer) listen() {
 		log4g.Info("accept connection from %s", netconn.RemoteAddr().String())
 		//new event
 		conn := newTcpConn(netconn)
-		s.hub.Add(conn)
+		s.hub.Add(conn.RemoteAddr().String(), conn)
+		for _, d := range s.dispatchers {
+			d.handleConnectionCreated(newNetAgent(conn, nil, nil, nil, s.serializer))
+		}
 
 		go func() { // one connection, one goroutine to read
 			s.closeConn.Add(1)

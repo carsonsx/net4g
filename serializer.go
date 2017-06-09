@@ -202,11 +202,11 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 				log4g.Error(err)
 				return
 			}
-			data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 			if log4g.IsTraceEnabled() {
 				log4g.Trace("serializing %v - %v", t, v)
 				log4g.Trace("serialized %v - %s", t, string(data))
 			}
+			data = util.AddIntHeader(data, NetConfig.MessageIdSize, uint64(id), NetConfig.LittleEndian)
 		} else {
 			err = errors.New(fmt.Sprintf("%v is not registed by any id", t))
 			log4g.Error(err)

@@ -27,6 +27,7 @@ func AddHandler(dispatcher *dispatcher, v interface{}, h func(agent NetAgent)) {
 func NewDispatcher(name string, goroutineNum int) *dispatcher {
 	p := new(dispatcher)
 	p.Name = name
+	p.createdChan = make(chan NetAgent, 100)
 	p.dispatchChan = make(chan NetAgent, 1000)
 	p.sessionClosedChan = make(chan NetSession, 100)
 	p.destroyChan = make(chan bool, 1)
@@ -45,6 +46,8 @@ type dispatcher struct {
 	typeHandlers             map[reflect.Type]func(agent NetAgent)
 	before_interceptors      []func(agent NetAgent)
 	after_interceptors       []func(agent NetAgent)
+	createdChan              chan NetAgent
+	connectionCreatedHandlers []func(agent NetAgent)
 	dispatchChan             chan NetAgent
 	sessionClosedChan        chan NetSession
 	connectionClosedHandlers []func(session NetSession)
@@ -65,12 +68,33 @@ func (p *dispatcher) AddHandler(h func(agent NetAgent), t ...reflect.Type) {
 	}
 }
 
+func (p *dispatcher) OnConnectionCreated(h func(agent NetAgent)) {
+	p.connectionCreatedHandlers = append(p.connectionCreatedHandlers, h)
+}
+
 func (p *dispatcher) OnConnectionClosed(h func(session NetSession)) {
 	p.connectionClosedHandlers = append(p.connectionClosedHandlers, h)
 }
 
 func (p *dispatcher) OnDestroy(h func()) {
 	p.destroyHandler = h
+}
+
+
+func (p *dispatcher) onConnectionCreatedHandlers(agent NetAgent) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log4g.Error("********************* Created Handler Panic *********************")
+			log4g.Error(r)
+			log4g.Error(string(debug.Stack()))
+			log4g.Error("********************* Created Handler Panic *********************")
+		}
+	}()
+
+	for _, h := range p.connectionCreatedHandlers {
+		h(agent)
+	}
 }
 
 func (p *dispatcher) dispatch(agent NetAgent) {
@@ -112,17 +136,15 @@ func (p *dispatcher) onConnectionClosedHandlers(session NetSession) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			log4g.Error("********************* Close Handler Panic *********************")
+			log4g.Error("********************* Closed Handler Panic *********************")
 			log4g.Error(r)
 			log4g.Error(string(debug.Stack()))
-			log4g.Error("********************* Close Handler Panic *********************")
+			log4g.Error("********************* Closed Handler Panic *********************")
 		}
 	}()
 
-	if len(p.connectionClosedHandlers) > 0 {
-		for _, h := range p.connectionClosedHandlers {
-			h(session)
-		}
+	for _, h := range p.connectionClosedHandlers {
+		h(session)
 	}
 }
 
@@ -150,6 +172,8 @@ func (p *dispatcher) run() {
 	outer:
 		for {
 			select {
+			case agent := <-p.createdChan:
+				p.onConnectionCreatedHandlers(agent)
 			case <-p.destroyChan:
 				p.onDestroyHandler()
 				break outer
@@ -224,24 +248,38 @@ func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool
 	return nil
 }
 
-func (p *dispatcher) SendToGroup(group string, v interface{}, prefix ...byte) error {
+func (p *dispatcher) Group(group string, v interface{}, prefix ...byte) error {
 	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.SendToGroup(group, b)
+	p.Hub.Group(group, b)
 	return nil
 }
 
-func (p *dispatcher) SendToGroupOne(group string, v interface{}, errFunc func(error), prefix ...byte) error {
+func (p *dispatcher) GroupOne(group string, v interface{}, errFunc func(error), prefix ...byte) error {
 	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.SendToGroupOne(group, b, errFunc)
+	p.Hub.GroupOne(group, b, errFunc)
 	return nil
+}
+
+func (p *dispatcher) One(v interface{}, errFunc func(error), prefix ...byte) error {
+	b, err := Serialize(p.serializer, v, prefix...)
+	if err != nil {
+		log4g.Error(err)
+		return err
+	}
+	p.Hub.One(b, errFunc)
+	return nil
+}
+
+func (p *dispatcher) handleConnectionCreated(agent NetAgent) {
+	p.createdChan <- agent
 }
 
 func (p *dispatcher) handleConnectionClosed(session NetSession) {

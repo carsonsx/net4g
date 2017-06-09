@@ -16,7 +16,7 @@ type NetReader interface {
 	Read(after func(data []byte) bool)
 }
 
-func newNetReader(conn *tcpNetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetHub) NetReader {
+func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, connMgr *NetHub) NetReader {
 	reader := new(netReader)
 	reader.conn = conn
 	reader.serializer = serializer
@@ -26,7 +26,7 @@ func newNetReader(conn *tcpNetConn, serializer Serializer, dispatchers []*dispat
 }
 
 type netReader struct {
-	conn        *tcpNetConn
+	conn        NetConn
 	serializer  Serializer
 	dispatchers []*dispatcher
 	mgr         *NetHub
@@ -39,7 +39,7 @@ func (r *netReader) Read(after func(data []byte) bool) {
 			r.conn.Close()
 			break
 		}
-		r.conn.lastReadTime = time.Now()
+		r.conn.Session().Set(SESSION_CONNECT_LAST_READ_TIME, time.Now())
 		r.process(data, after)
 	}
 }
@@ -79,5 +79,5 @@ func (r *netReader) process(raw []byte, after func(data []byte) bool) {
 		return
 	}
 
-	Dispatch(r.dispatchers, newNetAgent(r.conn, prefix, data, v, r.conn.RemoteAddr(), r.conn.Session(), r.serializer))
+	Dispatch(r.dispatchers, newNetAgent(r.conn, prefix, data, v, r.serializer))
 }
