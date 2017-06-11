@@ -74,10 +74,12 @@ func (r *netReader) process(raw []byte, after func(data []byte) bool) {
 		raw = raw[NetConfig.MessagePrefixSize:]
 	}
 
-	v, data, err := r.serializer.Deserialize(raw)
+	v, rp, err := r.serializer.Deserialize(raw)
 	if err != nil {
 		return
 	}
 
-	Dispatch(r.dispatchers, newNetAgent(r.conn, prefix, data, v, r.serializer))
+	rp.Prefix = prefix
+
+	Dispatch(r.dispatchers, newNetAgent(r.conn, rp, v, r.serializer))
 }

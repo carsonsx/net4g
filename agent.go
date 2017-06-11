@@ -89,8 +89,7 @@ func (s *netSession) Remove(key string) ()  {
 }
 
 type NetAgent interface {
-	Prefix() []byte
-	Bytes() []byte
+	RawPack() *RawPack
 	Msg() interface{}
 	RemoteAddr() net.Addr
 	Session() NetSession
@@ -98,11 +97,10 @@ type NetAgent interface {
 	Close()
 }
 
-func newNetAgent(conn NetConn, prefix, bytes []byte, msg interface{}, serializer Serializer) *netAgent {
+func newNetAgent(conn NetConn, rp *RawPack, msg interface{}, serializer Serializer) *netAgent {
 	agent := new(netAgent)
 	agent.conn = conn
-	agent.prefix = prefix
-	agent.bytes = bytes
+	agent.rp = rp
 	agent.msg = msg
 	agent.remoteAddr = conn.RemoteAddr()
 	agent.session = conn.Session()
@@ -112,20 +110,16 @@ func newNetAgent(conn NetConn, prefix, bytes []byte, msg interface{}, serializer
 
 type netAgent struct {
 	conn       NetConn
-	prefix      []byte
-	bytes      []byte
+	prefix     []byte
+	rp         *RawPack
 	msg        interface{}
 	remoteAddr net.Addr
 	session    NetSession
 	serializer Serializer
 }
 
-func (a *netAgent) Prefix() []byte {
-	return a.prefix
-}
-
-func (a *netAgent) Bytes() []byte {
-	return a.bytes
+func (a *netAgent) RawPack() *RawPack {
+	return a.rp
 }
 
 func (a *netAgent) Msg() interface{} {

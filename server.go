@@ -131,7 +131,7 @@ func (s *tcpServer) listen() {
 		conn := newTcpConn(netconn)
 		s.hub.Add(conn.RemoteAddr().String(), conn)
 		for _, d := range s.dispatchers {
-			d.handleConnectionCreated(newNetAgent(conn, nil, nil, nil, s.serializer))
+			d.handleConnectionCreated(newNetAgent(conn, nil, nil, s.serializer))
 		}
 
 		go func() { // one connection, one goroutine to read

@@ -20,10 +20,6 @@ func Dispatch(dispatchers []*dispatcher, agent NetAgent) {
 	}
 }
 
-func AddHandler(dispatcher *dispatcher, v interface{}, h func(agent NetAgent)) {
-	dispatcher.AddHandler(h, reflect.TypeOf(v))
-}
-
 func NewDispatcher(name string, goroutineNum int) *dispatcher {
 	p := new(dispatcher)
 	p.Name = name
@@ -31,7 +27,7 @@ func NewDispatcher(name string, goroutineNum int) *dispatcher {
 	p.dispatchChan = make(chan NetAgent, 1000)
 	p.sessionClosedChan = make(chan NetSession, 100)
 	p.destroyChan = make(chan bool, 1)
-	p.typeHandlers = make(map[reflect.Type]func(agent NetAgent))
+	p.msgHandlers = make(map[interface{}]func(agent NetAgent))
 	p.goroutineNum = goroutineNum
 	p.run()
 	log4g.Info("new a %s dispatcher", name)
@@ -43,7 +39,7 @@ type dispatcher struct {
 	serializer               Serializer
 	Hub                      *NetHub
 	globalHandlers           []func(agent NetAgent)
-	typeHandlers             map[reflect.Type]func(agent NetAgent)
+	msgHandlers              map[interface{}]func(agent NetAgent)
 	before_interceptors      []func(agent NetAgent)
 	after_interceptors       []func(agent NetAgent)
 	createdChan              chan NetAgent
@@ -58,10 +54,10 @@ type dispatcher struct {
 	wg                       sync.WaitGroup
 }
 
-func (p *dispatcher) AddHandler(h func(agent NetAgent), t ...reflect.Type) {
-	if len(t) > 0 {
-		p.typeHandlers[t[0]] = h
-		log4g.Info("dispatcher[%s] added a handler for %v", p.Name, t[0])
+func (p *dispatcher) AddHandler(h func(agent NetAgent), key ...interface{}) {
+	if len(key) > 0 {
+		p.msgHandlers[key[0]] = h
+		log4g.Info("dispatcher[%s] added a handler for %v", p.Name, key[0])
 	} else {
 		p.globalHandlers = append(p.globalHandlers, h)
 		log4g.Info("dispatcher[%s] added global handler", p.Name)
@@ -72,6 +68,7 @@ func (p *dispatcher) OnConnectionCreated(h func(agent NetAgent)) {
 	p.connectionCreatedHandlers = append(p.connectionCreatedHandlers, h)
 }
 
+
 func (p *dispatcher) OnConnectionClosed(h func(session NetSession)) {
 	p.connectionClosedHandlers = append(p.connectionClosedHandlers, h)
 }
@@ -81,21 +78,45 @@ func (p *dispatcher) OnDestroy(h func()) {
 }
 
 
-func (p *dispatcher) onConnectionCreatedHandlers(agent NetAgent) {
+func (p *dispatcher) run() {
+	p.wg.Add(p.goroutineNum)
 
-	defer func() {
-		if r := recover(); r != nil {
-			log4g.Error("********************* Created Handler Panic *********************")
-			log4g.Error(r)
-			log4g.Error(string(debug.Stack()))
-			log4g.Error("********************* Created Handler Panic *********************")
+	go func() {
+		defer p.wg.Done()
+	outer:
+		for {
+			select {
+			case <-p.destroyChan:
+				p.onDestroyHandler()
+				break outer
+			case session := <-p.sessionClosedChan:
+				p.onConnectionClosedHandlers(session)
+			case agent := <-p.createdChan:
+				p.onConnectionCreatedHandlers(agent)
+			case data := <-p.dispatchChan:
+				p.dispatch(data)
+			}
 		}
 	}()
 
-	for _, h := range p.connectionCreatedHandlers {
-		h(agent)
+	for i := 0; i < p.goroutineNum - 1; i++ {
+		go func() {
+			defer p.wg.Done()
+		outer:
+			for {
+				select {
+				case <-p.destroyChan:
+					break outer
+				case data := <-p.dispatchChan:
+					p.dispatch(data)
+				}
+			}
+		}()
 	}
+
+	p.running = true
 }
+
 
 func (p *dispatcher) dispatch(agent NetAgent) {
 
@@ -117,12 +138,23 @@ func (p *dispatcher) dispatch(agent NetAgent) {
 		h(agent)
 	}
 
-	t := reflect.TypeOf(agent.Msg())
-	if h, ok := p.typeHandlers[t]; ok {
-		log4g.Trace("dispatcher[%s] is dispatching %v to handler ", p.Name, t)
+	var key interface{}
+
+	if agent.Msg() == nil {
+		if agent.RawPack().Id > 0 {
+			key = agent.RawPack().Id
+		} else if agent.RawPack().Key != "" {
+			key = agent.RawPack().Key
+		}
+	} else {
+		key = reflect.TypeOf(agent.Msg())
+	}
+
+	if h, ok := p.msgHandlers[key]; ok {
+		log4g.Trace("dispatcher[%s] is dispatching %v to handler", p.Name, key)
 		h(agent)
 	} else {
-		log4g.Trace("dispatcher[%s] not found any handler ", p.Name)
+		log4g.Trace("dispatcher[%s] not found any handler for %v", p.Name, key)
 	}
 
 	for _, i := range p.after_interceptors {
@@ -130,9 +162,27 @@ func (p *dispatcher) dispatch(agent NetAgent) {
 	}
 }
 
+
+func (p *dispatcher) onConnectionCreatedHandlers(agent NetAgent) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log4g.Error("********************* Created Handler Panic *********************")
+			log4g.Error(r)
+			log4g.Error(string(debug.Stack()))
+			log4g.Error("********************* Created Handler Panic *********************")
+		}
+	}()
+
+	for _, h := range p.connectionCreatedHandlers {
+		h(agent)
+	}
+}
+
+
 func (p *dispatcher) onConnectionClosedHandlers(session NetSession) {
 
-	defer session.Get("wg").(*sync.WaitGroup).Done()
+	defer session.Get(p.Name + "-wg").(*sync.WaitGroup).Done()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -164,45 +214,6 @@ func (p *dispatcher) onDestroyHandler() {
 	}
 }
 
-func (p *dispatcher) run() {
-	p.wg.Add(p.goroutineNum)
-
-	go func() {
-		defer p.wg.Done()
-	outer:
-		for {
-			select {
-			case agent := <-p.createdChan:
-				p.onConnectionCreatedHandlers(agent)
-			case <-p.destroyChan:
-				p.onDestroyHandler()
-				break outer
-			case data := <-p.dispatchChan:
-				p.dispatch(data)
-			case session := <-p.sessionClosedChan:
-				p.onConnectionClosedHandlers(session)
-			}
-		}
-	}()
-
-	for i := 0; i < p.goroutineNum - 1; i++ {
-		go func() {
-			defer p.wg.Done()
-		outer:
-			for {
-				select {
-				case <-p.destroyChan:
-					p.onDestroyHandler()
-					break outer
-				case data := <-p.dispatchChan:
-					p.dispatch(data)
-				}
-			}
-		}()
-	}
-
-	p.running = true
-}
 
 func (p *dispatcher) Kick(filter func(session NetSession) bool) {
 	p.Hub.Kick(filter)
@@ -274,8 +285,7 @@ func (p *dispatcher) One(v interface{}, errFunc func(error), prefix ...byte) err
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.One(b, errFunc)
-	return nil
+	return p.Hub.One(b, errFunc)
 }
 
 func (p *dispatcher) handleConnectionCreated(agent NetAgent) {
@@ -286,10 +296,10 @@ func (p *dispatcher) handleConnectionClosed(session NetSession) {
 	log4g.Debug("handling closed session")
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
-	session.Set("wg", wg)
+	session.Set(p.Name + "-wg", wg)
 	p.sessionClosedChan <- session
 	wg.Wait()
-	session.Remove("wg")
+	session.Remove(p.Name + "wg")
 	log4g.Debug("handled closed session")
 }
 

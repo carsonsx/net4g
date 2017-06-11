@@ -61,15 +61,16 @@ func (c *TCPClient) DisableAutoReconnect() *TCPClient {
 
 func (c *TCPClient) Start() *TCPClient {
 
-	if c.serializer == nil {
-		c.serializer = NewJsonSerializer()
-	}
-
 	// Init the connection manager
 	c.hub = new(NetHub)
 	c.hub.enableLB = true
 	c.hub.heartbeat = c.heartbeat
 	c.hub.Start()
+
+	for _, d := range c.dispatchers {
+		d.serializer = c.serializer
+		d.Hub = c.hub
+	}
 
 	addrs, err := c.addrFn()
 	if err != nil {
@@ -166,7 +167,7 @@ func (c *TCPClient) connect(name, addr string) (conn NetConn, err error) {
 	}
 	c.hub.Add(name, conn)
 	for _, d := range c.dispatchers {
-		d.handleConnectionCreated(newNetAgent(conn, nil, nil, nil, c.serializer))
+		d.handleConnectionCreated(newNetAgent(conn, nil, nil, c.serializer))
 	}
 	return
 }

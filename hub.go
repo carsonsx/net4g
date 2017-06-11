@@ -19,7 +19,6 @@ type NetHub struct {
 	lbRound          int
 	addChan          chan *chanData
 	getChan          chan *chanData
-	getWait          sync.WaitGroup
 	keyChan          chan *chanData
 	removeChan       chan NetConn
 	size             int
@@ -42,6 +41,7 @@ type chanData struct {
 	filter  func(session NetSession) bool
 	once    bool
 	errFunc func(err error)
+	wg sync.WaitGroup
 }
 
 func (hub *NetHub) Start() {
@@ -113,7 +113,7 @@ func (hub *NetHub) do() (cond bool) {
 		log4g.Debug("connection count: %d", len(hub.connections))
 	case cData := <-hub.getChan:
 		cData.conn = hub.connections[cData.key]
-		hub.getWait.Done()
+		cData.wg.Done()
 	case conn := <-hub.removeChan:
 		hub._delete(conn)
 	case t := <-hub.heartbeatTicker.C:
@@ -133,10 +133,16 @@ func (hub *NetHub) do() (cond bool) {
 				if hub.lbRound >= connCount {
 					hub.lbRound = 0
 				}
-				hub.lbConnections[hub.lbRound].Write(cData.data)
+				log4g.Trace("group size: %d, round robin: %d", connCount, hub.lbRound)
+				err := hub.lbConnections[hub.lbRound].Write(cData.data)
+				if err != nil &&cData.errFunc != nil {
+					cData.errFunc(err)
+				}
 				hub.lbRound++
 			} else if cData.errFunc != nil {
-				cData.errFunc(errors.New(fmt.Sprintf("not found any connection", cData.group)))
+				err := errors.New("not found any connection")
+				log4g.Error(err)
+				cData.errFunc(err)
 			}
 		} else if cData.group != "" {// Send to group
 			conns := hub.groupsConn[cData.group]
@@ -147,7 +153,7 @@ func (hub *NetHub) do() (cond bool) {
 					if round >= groupsConnCount {
 						round = 0
 					}
-					//log4g.Debug("group size: %d, round robin: %d", groupsConnLen, round)
+					//log4g.Debug("group size: %d, round robin: %d", groupsConnCount, round)
 					conns[round].Write(cData.data)
 					round++
 					hub.groupsRound[cData.group] = round
@@ -160,7 +166,7 @@ func (hub *NetHub) do() (cond bool) {
 				}
 			}
 		} else {// broadcast by filter
-			log4g.Debug("broadcast to %d connections", len(hub.connections))
+			//log4g.Debug("broadcast to %d connections", len(hub.connections))
 			for _, conn := range hub.connections {
 				if cData.filter == nil || cData.filter(conn.Session()) {
 					conn.Write(cData.data)
@@ -216,11 +222,11 @@ func (hub *NetHub) Add(key string, conn NetConn) {
 }
 
 func (hub *NetHub) Get(key string) NetConn {
-	hub.getWait.Add(1)
 	cData := new(chanData)
 	cData.key = key
+	cData.wg.Add(1)
 	hub.getChan <- cData
-	hub.getWait.Wait()
+	cData.wg.Wait()
 	return cData.conn
 }
 
@@ -297,14 +303,24 @@ func (hub *NetHub) GroupOne(group string, data []byte, errFunc func(error)) {
 	hub.broadcastChan <- cData
 }
 
-func (hub *NetHub) One(data []byte, errFunc func(error)) {
+func (hub *NetHub) One(data []byte, errFunc func(error)) error {
+
 	if !hub.enableLB {
 		panic("required to enable load balance")
 	}
+
+	if hub.closed {
+		text := "hub was closed"
+		log4g.Error(text)
+		return errors.New(text)
+	}
+
 	cData := new(chanData)
 	cData.one = true
+	cData.data = data
 	cData.errFunc = errFunc
 	hub.broadcastChan <- cData
+	return nil
 }
 
 func (hub *NetHub) CloseConnections() {
@@ -322,10 +338,10 @@ func (hub *NetHub) Closed() bool {
 func (hub *NetHub) Destroy() {
 	hub.closing <- true
 	hub.wg.Wait()
-	close(hub.addChan)
-	close(hub.removeChan)
-	close(hub.broadcastChan)
-	close(hub.closing)
+	//close(hub.addChan)
+	//close(hub.removeChan)
+	//close(hub.broadcastChan)
+	//close(hub.closing)
 	hub.closed = true
 	log4g.Info("closed net hub")
 }

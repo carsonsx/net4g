@@ -108,7 +108,7 @@ func (c *tcpNetConn) Write(p []byte) error {
 	var err error
 	if c.closed {
 		text := "write to closed network connection"
-		//log4g.Error(text)
+		log4g.Error(text)
 		err = errors.New(text)
 		if NetConfig.KeepWriteData {
 			c.writeChan <- p
