@@ -35,20 +35,20 @@ func NewDispatcher(name string, goroutineNum int) *dispatcher {
 }
 
 type dispatcher struct {
-	Name                     string
-	serializer               Serializer
-	Hub                      *NetHub
-	globalHandlers           []func(agent NetAgent)
-	msgHandlers              map[interface{}]func(agent NetAgent)
-	before_interceptors      []func(agent NetAgent)
-	after_interceptors       []func(agent NetAgent)
-	createdChan              chan NetAgent
+	Name                      string
+	serializer                Serializer
+	hub                       *NetHub
+	globalHandlers            []func(agent NetAgent)
+	msgHandlers               map[interface{}]func(agent NetAgent)
+	before_interceptors       []func(agent NetAgent)
+	after_interceptors        []func(agent NetAgent)
+	createdChan               chan NetAgent
 	connectionCreatedHandlers []func(agent NetAgent)
-	dispatchChan             chan NetAgent
-	sessionClosedChan        chan NetSession
-	connectionClosedHandlers []func(session NetSession)
-	destroyChan              chan bool
-	destroyHandler           func()
+	dispatchChan              chan NetAgent
+	sessionClosedChan         chan NetSession
+	connectionClosedHandlers  []func(session NetSession)
+	destroyChan               chan bool
+	destroyHandler            func()
 	goroutineNum             int
 	running                  bool
 	wg                       sync.WaitGroup
@@ -216,7 +216,7 @@ func (p *dispatcher) onDestroyHandler() {
 
 
 func (p *dispatcher) Kick(filter func(session NetSession) bool) {
-	p.Hub.Kick(filter)
+	p.hub.Kick(filter)
 }
 
 func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool, prefix ...byte) error {
@@ -225,7 +225,7 @@ func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bo
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.Broadcast(b, filter)
+	p.hub.Broadcast(b, filter)
 	return nil
 }
 
@@ -235,7 +235,7 @@ func (p *dispatcher) BroadcastAll(v interface{}, prefix ...byte) error {
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.BroadcastAll(b)
+	p.hub.BroadcastAll(b)
 	return nil
 }
 
@@ -245,7 +245,7 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}, prefix
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.BroadcastOthers(mySession, b)
+	p.hub.BroadcastOthers(mySession, b)
 	return nil
 }
 
@@ -255,8 +255,12 @@ func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.Someone(b, filter)
+	p.hub.Someone(b, filter)
 	return nil
+}
+
+func (p *dispatcher) SetGroup(session NetSession, group string) {
+	p.hub.SetGroup(session, group)
 }
 
 func (p *dispatcher) Group(group string, v interface{}, prefix ...byte) error {
@@ -265,7 +269,7 @@ func (p *dispatcher) Group(group string, v interface{}, prefix ...byte) error {
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.Group(group, b)
+	p.hub.Group(group, b)
 	return nil
 }
 
@@ -275,7 +279,7 @@ func (p *dispatcher) GroupOne(group string, v interface{}, errFunc func(error), 
 		log4g.Error(err)
 		return err
 	}
-	p.Hub.GroupOne(group, b, errFunc)
+	p.hub.GroupOne(group, b, errFunc)
 	return nil
 }
 
@@ -285,7 +289,7 @@ func (p *dispatcher) One(v interface{}, errFunc func(error), prefix ...byte) err
 		log4g.Error(err)
 		return err
 	}
-	return p.Hub.One(b, errFunc)
+	return p.hub.One(b, errFunc)
 }
 
 func (p *dispatcher) handleConnectionCreated(agent NetAgent) {

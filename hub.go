@@ -92,6 +92,7 @@ func (hub *NetHub) do() (cond bool) {
 		}
 		hub.size++
 		log4g.Debug("connection count: %d", len(hub.connections))
+		cData.wg.Done()
 	case filter := <-hub.kickChan:
 		if filter != nil {
 			for _, conn := range hub.connections {
@@ -145,6 +146,7 @@ func (hub *NetHub) do() (cond bool) {
 				cData.errFunc(err)
 			}
 		} else if cData.group != "" {// Send to group
+			log4g.Debug("send to group %s", cData.group)
 			conns := hub.groupsConn[cData.group]
 			if cData.once { // send to group's one by round robin
 				round := hub.groupsRound[cData.group]
@@ -157,8 +159,12 @@ func (hub *NetHub) do() (cond bool) {
 					conns[round].Write(cData.data)
 					round++
 					hub.groupsRound[cData.group] = round
-				} else if cData.errFunc != nil {
-					cData.errFunc(errors.New(fmt.Sprintf("not found any group[%s] connection", cData.group)))
+				} else {
+					err := errors.New(fmt.Sprintf("not found any group[%s] connection", cData.group))
+					log4g.Error(err)
+					if cData.errFunc != nil {
+						cData.errFunc(err)
+					}
 				}
 			} else { // send to group's all
 				for _, conn := range conns {
@@ -218,7 +224,9 @@ func (hub *NetHub) Add(key string, conn NetConn) {
 	cData := new(chanData)
 	cData.key = key
 	cData.conn = conn
+	cData.wg.Add(1)
 	hub.addChan <- cData
+	cData.wg.Wait()
 }
 
 func (hub *NetHub) Get(key string) NetConn {
@@ -275,15 +283,18 @@ func (hub *NetHub) Range(h func(conn NetConn)) {
 	}
 }
 
-func (hub *NetHub) SetGroup(conn NetConn, group string) {
+func (hub *NetHub) SetGroup(session NetSession, group string) {
 	if group != "" {
 		hub.groupMutex.Lock()
-		conn.Session().Set(SESSION_GROUP_NAME, group)
-		groups := hub.groupsConn[group]
-		hub.groupsConn[group] = append(groups, conn)
+		conn := hub.Get(session.GetString(SESSION_CONNECT_KEY))
+		if conn != nil {
+			groups := hub.groupsConn[group]
+			hub.groupsConn[group] = append(groups, conn)
+			session.Set(SESSION_GROUP_NAME, group)
+			log4g.Debug("set group %s for %s", group, conn.RemoteAddr().String())
+			log4g.Debug("group size: %d", len(hub.groupsConn[group]))
+		}
 		hub.groupMutex.Unlock()
-		log4g.Debug("set group %s for %s", group, conn.RemoteAddr().String())
-		log4g.Debug("group size: %d", len(hub.groupsConn[group]))
 	}
 }
 

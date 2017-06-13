@@ -318,7 +318,7 @@ func (s *jsonSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, er
 				}
 			}
 		} else {
-			err = errors.New(fmt.Sprintf("id[%d] is not registered by any type", rp.Data))
+			err = errors.New(fmt.Sprintf("id[%d] is not registered by any type", rp.Id))
 			log4g.Error(err)
 		}
 	} else {

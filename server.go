@@ -46,7 +46,7 @@ func (s *tcpServer) AddDispatchers(dispatchers ...*dispatcher) *tcpServer {
 			panic(fmt.Sprintf("dispatcher [%s] has bind with server [%s]", d.Name, s.Name))
 		}
 		d.serializer = s.serializer
-		d.Hub = s.hub
+		d.hub = s.hub
 		s.dispatchers = append(s.dispatchers, d)
 	}
 	return s
@@ -95,7 +95,7 @@ func (s *tcpServer) Start() *tcpServer {
 
 	for _, d := range s.dispatchers {
 		d.serializer = s.serializer
-		d.Hub = s.hub
+		d.hub = s.hub
 	}
 
 	go func() {

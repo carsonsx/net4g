@@ -69,7 +69,7 @@ func (c *TCPClient) Start() *TCPClient {
 
 	for _, d := range c.dispatchers {
 		d.serializer = c.serializer
-		d.Hub = c.hub
+		d.hub = c.hub
 	}
 
 	addrs, err := c.addrFn()
