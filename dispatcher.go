@@ -292,6 +292,20 @@ func (p *dispatcher) One(v interface{}, errFunc func(error), prefix ...byte) err
 	return p.hub.One(b, errFunc)
 }
 
+func (p *dispatcher) RangeConn(f func(NetConn)) {
+	conns := p.hub.Slice()
+	for _, conn := range conns {
+		f(conn)
+	}
+}
+
+func (p *dispatcher) RangeSession(f func(session NetSession)) {
+	conns := p.hub.Slice()
+	for _, conn := range conns {
+		f(conn.Session())
+	}
+}
+
 func (p *dispatcher) handleConnectionCreated(agent NetAgent) {
 	p.createdChan <- agent
 }

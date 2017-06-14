@@ -19,6 +19,7 @@ type NetHub struct {
 	lbRound          int
 	addChan          chan *chanData
 	getChan          chan *chanData
+	sliceChan        chan *chanData
 	keyChan          chan *chanData
 	removeChan       chan NetConn
 	size             int
@@ -34,6 +35,7 @@ type NetHub struct {
 
 type chanData struct {
 	conn    NetConn
+	conns    []NetConn
 	key     string
 	one     bool
 	group   string
@@ -51,6 +53,7 @@ func (hub *NetHub) Start() {
 	hub.addChan = make(chan *chanData, 100)
 	hub.keyChan = make(chan *chanData, 100)
 	hub.getChan = make(chan *chanData, 1)
+	hub.sliceChan = make(chan *chanData, 1)
 	hub.removeChan = make(chan NetConn, 100)
 	hub.kickChan = make(chan func(session NetSession) bool, 10)
 	hub.broadcastChan = make(chan *chanData, 1000)
@@ -114,6 +117,11 @@ func (hub *NetHub) do() (cond bool) {
 		log4g.Debug("connection count: %d", len(hub.connections))
 	case cData := <-hub.getChan:
 		cData.conn = hub.connections[cData.key]
+		cData.wg.Done()
+	case cData := <-hub.sliceChan:
+		for _, conn := range hub.connections {
+			cData.conns = append(cData.conns, conn)
+		}
 		cData.wg.Done()
 	case conn := <-hub.removeChan:
 		hub._delete(conn)
@@ -242,6 +250,14 @@ func (hub *NetHub) Remove(conn NetConn) {
 	hub.removeChan <- conn
 }
 
+func (hub *NetHub) Slice() []NetConn {
+	cData := new(chanData)
+	cData.wg.Add(1)
+	hub.sliceChan <- cData
+	cData.wg.Wait()
+	return cData.conns
+}
+
 func (hub *NetHub) Heartbeat(conn NetConn) {
 	if hub.heartbeat {
 		conn.Session().Set(HEART_BEAT_LAST_TIME, time.Now().UnixNano())
@@ -275,12 +291,6 @@ func (hub *NetHub) Someone(data []byte, filter func(session NetSession) bool) {
 	cData.filter = filter
 	cData.once = true
 	hub.broadcastChan <- cData
-}
-
-func (hub *NetHub) Range(h func(conn NetConn)) {
-	for _, conn := range hub.connections {
-		h(conn)
-	}
 }
 
 func (hub *NetHub) SetGroup(session NetSession, group string) {
