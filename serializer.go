@@ -304,16 +304,15 @@ func (s *jsonSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, er
 		var ok bool
 		if rp.Type, ok = s.id_type_map[rp.Id]; ok {
 			rp.Data = raw[NetConfig.MessageIdSize:]
-			if len(rp.Data) == 0 {
-				return
-			}
 			if s.deserialize_map[rp.Id] {
-				value := reflect.New(rp.Type.Elem()).Interface()
-				err = json.Unmarshal(rp.Data, value)
+				v = reflect.New(rp.Type.Elem()).Interface()
+				if len(rp.Data) == 0 {
+					return
+				}
+				err = json.Unmarshal(rp.Data, v)
 				if err != nil {
 					log4g.Error(err)
 				} else {
-					v = value
 					log4g.Trace("deserialized %v - %s", rp.Type, string(rp.Data))
 				}
 			}
@@ -335,18 +334,17 @@ func (s *jsonSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, er
 			return
 		}
 		for rp.Key, rp.Data = range m_raw {
-			if len(rp.Data) == 0 {
-				continue
-			}
 			var ok bool
 			if rp.Type, ok = s.key_type_map[rp.Key]; ok {
 				if s.deserialize_map[rp.Key] {
-					value := reflect.New(rp.Type.Elem()).Interface()
-					err = json.Unmarshal(rp.Data, value)
+					v = reflect.New(rp.Type.Elem()).Interface()
+					if len(rp.Data) == 0 {
+						continue
+					}
+					err = json.Unmarshal(rp.Data, v)
 					if err != nil {
 						log4g.Error(err)
 					} else {
-						v = value
 						log4g.Trace("deserialized %v - %s", rp.Type, string(raw))
 						break
 					}
@@ -425,16 +423,15 @@ func (s *protobufSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack
 	var ok bool
 	if rp.Type, ok = s.id_type_map[rp.Id]; ok {
 		rp.Data = raw[NetConfig.MessageIdSize:]
-		if len(rp.Data) == 0 {
-			return
-		}
 		if s.deserialize_map[rp.Id] {
-			value := reflect.New(rp.Type.Elem()).Interface()
-			err = proto.UnmarshalMerge(rp.Data, value.(proto.Message))
+			v = reflect.New(rp.Type.Elem()).Interface()
+			if len(rp.Data) == 0 {
+				return
+			}
+			err = proto.UnmarshalMerge(rp.Data, v.(proto.Message))
 			if err != nil {
 				log4g.Error(err)
 			} else {
-				v = value
 				if log4g.IsDebugEnabled() {
 					bytes, _ := json.Marshal(v)
 					log4g.Trace("deserialize %v - %v", rp.Type, string(bytes))
