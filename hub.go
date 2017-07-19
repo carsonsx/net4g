@@ -19,6 +19,7 @@ type NetHub struct {
 	lbRound          int
 	addChan          chan *chanData
 	getChan          chan *chanData
+	hasChan          chan *chanData
 	sliceChan        chan *chanData
 	keyChan          chan *chanData
 	removeChan       chan NetConn
@@ -37,6 +38,7 @@ type chanData struct {
 	conn    NetConn
 	conns    []NetConn
 	key     string
+	value   interface{}
 	one     bool
 	group   string
 	data    []byte
@@ -53,6 +55,7 @@ func (hub *NetHub) Start() {
 	hub.addChan = make(chan *chanData, 100)
 	hub.keyChan = make(chan *chanData, 100)
 	hub.getChan = make(chan *chanData, 1)
+	hub.hasChan = make(chan *chanData, 1)
 	hub.sliceChan = make(chan *chanData, 1)
 	hub.removeChan = make(chan NetConn, 100)
 	hub.kickChan = make(chan func(session NetSession) bool, 10)
@@ -118,6 +121,15 @@ func (hub *NetHub) do() (cond bool) {
 	case cData := <-hub.getChan:
 		cData.conn = hub.connections[cData.key]
 		cData.wg.Done()
+	case cData := <-hub.hasChan:
+		cData.one = false
+		for _, conn := range hub.connections {
+			if conn.Session().Get(cData.key) == cData.value {
+				cData.one = true
+				break
+			}
+		}
+		cData.wg.Done()
 	case cData := <-hub.sliceChan:
 		for _, conn := range hub.connections {
 			cData.conns = append(cData.conns, conn)
@@ -181,9 +193,15 @@ func (hub *NetHub) do() (cond bool) {
 			}
 		} else {// broadcast by filter
 			//log4g.Debug("broadcast to %d connections", len(hub.connections))
+			if log4g.IsDebugEnabled() {
+				log4g.Debug("broadcast msg to %d connections", len(hub.connections))
+			}
 			for _, conn := range hub.connections {
 				if cData.filter == nil || cData.filter(conn.Session()) {
 					conn.Write(cData.data)
+					if log4g.IsDebugEnabled() {
+						log4g.Debug("sent to %s", conn.Session().Get(SESSION_ID))
+					}
 					if cData.once {
 						break
 					}
@@ -244,6 +262,18 @@ func (hub *NetHub) Get(key string) NetConn {
 	hub.getChan <- cData
 	cData.wg.Wait()
 	return cData.conn
+}
+
+func (hub *NetHub) HasSession(k string, v interface{}) bool {
+	log4g.Trace("has session: key=%s,val=%s", k, v)
+	cData := new(chanData)
+	cData.wg.Add(1)
+	cData.key = k
+	cData.value = v
+	hub.hasChan <- cData
+	cData.wg.Wait()
+	log4g.Trace("has session: %v",  cData.one)
+	return cData.one
 }
 
 func (hub *NetHub) Remove(conn NetConn) {

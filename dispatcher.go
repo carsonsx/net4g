@@ -219,6 +219,11 @@ func (p *dispatcher) Kick(filter func(session NetSession) bool) {
 	p.hub.Kick(filter)
 }
 
+func (p *dispatcher) HasSession(k string, v interface{}) bool {
+	return p.hub.HasSession(k, v)
+}
+
+
 func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool, prefix ...byte) error {
 	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
