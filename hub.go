@@ -193,14 +193,11 @@ func (hub *NetHub) do() (cond bool) {
 			}
 		} else {// broadcast by filter
 			//log4g.Debug("broadcast to %d connections", len(hub.connections))
-			if log4g.IsDebugEnabled() {
-				log4g.Debug("broadcast msg to %d connections", len(hub.connections))
-			}
 			for _, conn := range hub.connections {
 				if cData.filter == nil || cData.filter(conn.Session()) {
 					conn.Write(cData.data)
 					if log4g.IsDebugEnabled() {
-						log4g.Debug("sent to %s", conn.Session().Get(SESSION_ID))
+						log4g.Debug("[broadcast] sent to %s", conn.Session().Get(SESSION_ID))
 					}
 					if cData.once {
 						break
