@@ -25,7 +25,7 @@ type tcpServer struct {
 	serializer    Serializer
 	dispatchers   []*dispatcher
 	mutex         sync.Mutex
-	hub           *NetHub
+	hub           NetHub
 	heartbeat     bool
 	listener      net.Listener
 	closeConn     sync.WaitGroup
@@ -76,7 +76,7 @@ func (s *tcpServer) Start() *tcpServer {
 		go func() {
 			for {
 				time.Sleep(180 * time.Second)
-				log4g.Info("*[Server Status] goroutine  num: %d, connection num: %d", runtime.NumGoroutine(), len(s.hub.connections))
+				log4g.Info("*[Server Status] goroutine  num: %d, connection num: %d", runtime.NumGoroutine(), s.hub.Count())
 			}
 		}()
 	}
@@ -89,9 +89,7 @@ func (s *tcpServer) Start() *tcpServer {
 	log4g.Info("TCP server listening on %s", s.listener.Addr().String())
 
 	// Init the connection manager
-	s.hub = new(NetHub)
-	s.hub.heartbeat = s.heartbeat
-	s.hub.Start()
+	s.hub = NewNetHub(s.heartbeat, false)
 
 	for _, d := range s.dispatchers {
 		d.serializer = s.serializer
@@ -130,8 +128,9 @@ func (s *tcpServer) listen() {
 		//new event
 		conn := newTcpConn(netconn)
 		s.hub.Add(conn.RemoteAddr().String(), conn)
+		agent := newNetAgent(s.hub, conn, nil, nil, s.serializer)
 		for _, d := range s.dispatchers {
-			d.handleConnectionCreated(newNetAgent(conn, nil, nil, s.serializer))
+			d.handleConnectionCreated(agent)
 		}
 
 		go func() { // one connection, one goroutine to read
@@ -149,7 +148,7 @@ func (s *tcpServer) listen() {
 			//close event
 			s.hub.Remove(conn)
 			for _, d := range s.dispatchers {
-				d.handleConnectionClosed(conn.Session())
+				d.handleConnectionClosed(agent)
 			}
 			log4g.Info("disconnected from %s", conn.RemoteAddr().String())
 		}()

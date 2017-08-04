@@ -36,8 +36,8 @@ type Serializer interface {
 	RangeKey(f func(key string, t reflect.Type))
 }
 
-func newEmptySerializer() *emptySerializer {
-	s := new(emptySerializer)
+func NewEmptySerializer() *EmptySerializer {
+	s := new(EmptySerializer)
 	s.type_id_map = make(map[reflect.Type]int)
 	s.id_type_map = make(map[int]reflect.Type)
 	s.type_key_map = make(map[reflect.Type]string)
@@ -47,7 +47,7 @@ func newEmptySerializer() *emptySerializer {
 	return s
 }
 
-type emptySerializer struct {
+type EmptySerializer struct {
 	type_id_map     map[reflect.Type]int
 	type_key_map    map[reflect.Type]string
 	id_type_map     map[int]reflect.Type
@@ -60,11 +60,11 @@ type emptySerializer struct {
 	byId            bool
 }
 
-func (s *emptySerializer) SetIdStartingValue(id int) {
+func (s *EmptySerializer) SetIdStartingValue(id int) {
 	s.id = id
 }
 
-func (s *emptySerializer) RegisterId(t reflect.Type, deserialize bool, id_at_most_one ...int) (id int, err error) {
+func (s *EmptySerializer) RegisterId(t reflect.Type, deserialize bool, id_at_most_one ...int) (id int, err error) {
 
 	if t == nil || t.Kind() != reflect.Ptr {
 		panic("type must be a pointer")
@@ -103,7 +103,7 @@ func (s *emptySerializer) RegisterId(t reflect.Type, deserialize bool, id_at_mos
 	return
 }
 
-func (s *emptySerializer) RegisterKey(t reflect.Type, deserialize bool, key_at_most_one ...string) (key string, err error) {
+func (s *EmptySerializer) RegisterKey(t reflect.Type, deserialize bool, key_at_most_one ...string) (key string, err error) {
 
 	if t == nil || t.Kind() != reflect.Ptr {
 		panic("type must be a pointer")
@@ -143,29 +143,29 @@ func (s *emptySerializer) RegisterKey(t reflect.Type, deserialize bool, key_at_m
 	return
 }
 
-func (s *emptySerializer) RangeId(f func(id int, t reflect.Type)) {
+func (s *EmptySerializer) RangeId(f func(id int, t reflect.Type)) {
 	for _, id := range s.ids {
 		f(id, s.id_type_map[id])
 	}
 }
 
-func (s *emptySerializer) RangeKey(f func(key string, t reflect.Type)) {
+func (s *EmptySerializer) RangeKey(f func(key string, t reflect.Type)) {
 	for _, key := range s.keys {
 		f(key, s.key_type_map[key])
 	}
 }
 
 func NewByteSerializer() Serializer {
-	s := new(byteSerializer)
-	s.emptySerializer = newEmptySerializer()
+	s := new(ByteSerializer)
+	s.EmptySerializer = NewEmptySerializer()
 	return s
 }
 
-type byteSerializer struct {
-	*emptySerializer
+type ByteSerializer struct {
+	*EmptySerializer
 }
 
-func (s *byteSerializer) Serialize(v interface{}) (data []byte, err error) {
+func (s *ByteSerializer) Serialize(v interface{}) (data []byte, err error) {
 	if rp, ok := v.(*RawPack); ok {
 		log4g.Trace("serialized - %v", rp)
 		data = util.AddIntHeader(rp.Data, NetConfig.MessageIdSize, uint64(rp.Id), NetConfig.LittleEndian)
@@ -175,7 +175,7 @@ func (s *byteSerializer) Serialize(v interface{}) (data []byte, err error) {
 	return
 }
 
-func (s *byteSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
+func (s *ByteSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
 	rp = new(RawPack)
 	rp.Id = int(util.GetIntHeader(raw, NetConfig.MessageIdSize, NetConfig.LittleEndian))
 	rp.Data = raw[NetConfig.MessageIdSize:]
@@ -185,35 +185,35 @@ func (s *byteSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, er
 }
 
 func NewStringSerializer() Serializer {
-	s := new(stringSerializer)
-	s.emptySerializer = newEmptySerializer()
+	s := new(StringSerializer)
+	s.EmptySerializer = NewEmptySerializer()
 	return s
 }
 
-type stringSerializer struct {
-	*emptySerializer
+type StringSerializer struct {
+	*EmptySerializer
 }
 
-func (s *stringSerializer) Serialize(v interface{}) (raw []byte, err error) {
+func (s *StringSerializer) Serialize(v interface{}) (raw []byte, err error) {
 	return []byte(v.(string)), nil
 }
 
-func (s *stringSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
+func (s *StringSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
 	rp = new(RawPack)
 	return string(raw), rp, nil
 }
 
 func NewJsonSerializer() Serializer {
-	s := new(jsonSerializer)
-	s.emptySerializer = newEmptySerializer()
+	s := new(JsonSerializer)
+	s.EmptySerializer = NewEmptySerializer()
 	return s
 }
 
-type jsonSerializer struct {
-	*emptySerializer
+type JsonSerializer struct {
+	*EmptySerializer
 }
 
-func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
+func (s *JsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 
 	if !s.registered {
 		panic("not registered any id or key")
@@ -284,7 +284,7 @@ func (s *jsonSerializer) Serialize(v interface{}) (data []byte, err error) {
 	return
 }
 
-func (s *jsonSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
+func (s *JsonSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
 
 	if !s.registered {
 		panic("not registered any id or key")
@@ -359,16 +359,16 @@ func (s *jsonSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, er
 }
 
 func NewProtobufSerializer() Serializer {
-	s := new(protobufSerializer)
-	s.emptySerializer = newEmptySerializer()
+	s := new(ProtobufSerializer)
+	s.EmptySerializer = NewEmptySerializer()
 	return s
 }
 
-type protobufSerializer struct {
-	*emptySerializer
+type ProtobufSerializer struct {
+	*EmptySerializer
 }
 
-func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
+func (s *ProtobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 
 	if !s.registered {
 		log4g.Panic("not registered any id")
@@ -405,7 +405,7 @@ func (s *protobufSerializer) Serialize(v interface{}) (data []byte, err error) {
 	return
 }
 
-func (s *protobufSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
+func (s *ProtobufSerializer) Deserialize(raw []byte) (v interface{}, rp *RawPack, err error) {
 	if !s.registered {
 		log4g.Panic("not registered any id")
 	}

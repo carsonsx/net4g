@@ -25,7 +25,7 @@ func NewDispatcher(name string, goroutineNum int) *dispatcher {
 	p.Name = name
 	p.createdChan = make(chan NetAgent, 100)
 	p.dispatchChan = make(chan NetAgent, 1000)
-	p.sessionClosedChan = make(chan NetSession, 100)
+	p.sessionClosedChan = make(chan NetAgent, 100)
 	p.destroyChan = make(chan bool, 1)
 	p.msgHandlers = make(map[interface{}]func(agent NetAgent))
 	p.goroutineNum = goroutineNum
@@ -37,7 +37,7 @@ func NewDispatcher(name string, goroutineNum int) *dispatcher {
 type dispatcher struct {
 	Name                      string
 	serializer                Serializer
-	hub                       *NetHub
+	hub                       NetHub
 	globalHandlers            []func(agent NetAgent)
 	msgHandlers               map[interface{}]func(agent NetAgent)
 	before_interceptors       []func(agent NetAgent)
@@ -45,8 +45,8 @@ type dispatcher struct {
 	createdChan               chan NetAgent
 	connectionCreatedHandlers []func(agent NetAgent)
 	dispatchChan              chan NetAgent
-	sessionClosedChan         chan NetSession
-	connectionClosedHandlers  []func(session NetSession)
+	sessionClosedChan         chan NetAgent
+	connectionClosedHandlers  []func(agent NetAgent)
 	destroyChan               chan bool
 	destroyHandler            func()
 	goroutineNum             int
@@ -69,7 +69,7 @@ func (p *dispatcher) OnConnectionCreated(h func(agent NetAgent)) {
 }
 
 
-func (p *dispatcher) OnConnectionClosed(h func(session NetSession)) {
+func (p *dispatcher) OnConnectionClosed(h func(agent NetAgent)) {
 	p.connectionClosedHandlers = append(p.connectionClosedHandlers, h)
 }
 
@@ -89,8 +89,8 @@ func (p *dispatcher) run() {
 			case <-p.destroyChan:
 				p.onDestroyHandler()
 				break outer
-			case session := <-p.sessionClosedChan:
-				p.onConnectionClosedHandlers(session)
+			case agent := <-p.sessionClosedChan:
+				p.onConnectionClosedHandlers(agent)
 			case agent := <-p.createdChan:
 				p.onConnectionCreatedHandlers(agent)
 			case data := <-p.dispatchChan:
@@ -180,9 +180,9 @@ func (p *dispatcher) onConnectionCreatedHandlers(agent NetAgent) {
 }
 
 
-func (p *dispatcher) onConnectionClosedHandlers(session NetSession) {
+func (p *dispatcher) onConnectionClosedHandlers(agent NetAgent) {
 
-	defer session.Get(p.Name + "-wg").(*sync.WaitGroup).Done()
+	defer agent.Session().Get(p.Name + "-wg").(*sync.WaitGroup).Done()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -194,7 +194,7 @@ func (p *dispatcher) onConnectionClosedHandlers(session NetSession) {
 	}()
 
 	for _, h := range p.connectionClosedHandlers {
-		h(session)
+		h(agent)
 	}
 }
 
@@ -215,14 +215,9 @@ func (p *dispatcher) onDestroyHandler() {
 }
 
 
-func (p *dispatcher) Kick(filter func(session NetSession) bool) {
-	p.hub.Kick(filter)
+func (p *dispatcher) Kick(key string) {
+	p.hub.Kick(key)
 }
-
-func (p *dispatcher) HasSession(k string, v interface{}) bool {
-	return p.hub.HasSession(k, v)
-}
-
 
 func (p *dispatcher) Broadcast(v interface{}, filter func(session NetSession) bool, prefix ...byte) error {
 	b, err := Serialize(p.serializer, v, prefix...)
@@ -254,13 +249,30 @@ func (p *dispatcher) BroadcastOthers(mySession NetSession, v interface{}, prefix
 	return nil
 }
 
-func (p *dispatcher) Someone(v interface{}, filter func(session NetSession) bool, prefix ...byte) error {
+func (p *dispatcher) BroadcastOne(v interface{}, errFunc func(error), prefix ...byte) error {
 	b, err := Serialize(p.serializer, v, prefix...)
 	if err != nil {
 		log4g.Error(err)
 		return err
 	}
-	p.hub.Someone(b, filter)
+	return p.hub.BroadcastOne(b, errFunc)
+}
+
+func (p *dispatcher) Send(key string, v interface{}) error {
+	data, err := Serialize(p.serializer, v)
+	if err != nil {
+		return err
+	}
+	p.hub.Send(key, data)
+	return nil
+}
+
+func (p *dispatcher) MultiSend(keys []string, v interface{}) error {
+	data, err := Serialize(p.serializer, v)
+	if err != nil {
+		return err
+	}
+	p.hub.MultiSend(keys, data)
 	return nil
 }
 
@@ -288,15 +300,6 @@ func (p *dispatcher) GroupOne(group string, v interface{}, errFunc func(error), 
 	return nil
 }
 
-func (p *dispatcher) One(v interface{}, errFunc func(error), prefix ...byte) error {
-	b, err := Serialize(p.serializer, v, prefix...)
-	if err != nil {
-		log4g.Error(err)
-		return err
-	}
-	return p.hub.One(b, errFunc)
-}
-
 func (p *dispatcher) RangeConn(f func(NetConn)) {
 	conns := p.hub.Slice()
 	for _, conn := range conns {
@@ -315,14 +318,14 @@ func (p *dispatcher) handleConnectionCreated(agent NetAgent) {
 	p.createdChan <- agent
 }
 
-func (p *dispatcher) handleConnectionClosed(session NetSession) {
+func (p *dispatcher) handleConnectionClosed(agent NetAgent) {
 	log4g.Debug("handling closed session")
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
-	session.Set(p.Name + "-wg", wg)
-	p.sessionClosedChan <- session
+	agent.Session().Set(p.Name + "-wg", wg)
+	p.sessionClosedChan <- agent
 	wg.Wait()
-	session.Remove(p.Name + "wg")
+	agent.Session().Remove(p.Name + "wg")
 	log4g.Debug("handled closed session")
 }
 

@@ -29,7 +29,7 @@ type TCPClient struct {
 	reconnectDelay int
 	serializer     Serializer
 	dispatchers    []*dispatcher
-	hub            *NetHub
+	hub            NetHub
 	heartbeat      bool
 	heartbeatData  []byte
 	sig            chan os.Signal
@@ -62,10 +62,7 @@ func (c *TCPClient) DisableAutoReconnect() *TCPClient {
 func (c *TCPClient) Start() *TCPClient {
 
 	// Init the connection manager
-	c.hub = new(NetHub)
-	c.hub.enableLB = true
-	c.hub.heartbeat = c.heartbeat
-	c.hub.Start()
+	c.hub = NewNetHub(c.heartbeat, true)
 
 	for _, d := range c.dispatchers {
 		d.serializer = c.serializer
@@ -125,8 +122,9 @@ func (c *TCPClient) doConnect(addr *NetAddr) {
 				return true
 			})
 			c.hub.Remove(conn)
+			agent := newNetAgent(c.hub, conn, nil, nil, c.serializer)
 			for _, d := range c.dispatchers {
-				d.handleConnectionClosed(conn.Session())
+				d.handleConnectionClosed(agent)
 			}
 		}
 
@@ -166,8 +164,9 @@ func (c *TCPClient) connect(name, addr string) (conn NetConn, err error) {
 		}
 	}
 	c.hub.Add(name, conn)
+	agent := newNetAgent(c.hub, conn, nil, nil, c.serializer)
 	for _, d := range c.dispatchers {
-		d.handleConnectionCreated(newNetAgent(conn, nil, nil, c.serializer))
+		d.handleConnectionCreated(agent)
 	}
 	return
 }

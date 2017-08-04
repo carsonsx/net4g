@@ -1,15 +1,46 @@
 package net4g
 
 import (
-	"sync"
-	"time"
-	"github.com/carsonsx/log4g"
-	"runtime/debug"
 	"errors"
 	"fmt"
+	"github.com/carsonsx/log4g"
+	"runtime/debug"
+	"sync"
+	"time"
 )
 
-type NetHub struct {
+func NewNetHub(heartbeat bool, lb bool) *netHub {
+	hub := new(netHub)
+	hub.heartbeat = heartbeat
+	hub.enableLB = lb
+	hub.start()
+	return hub
+}
+
+type NetHub interface {
+	Add(key string, conn NetConn)
+	Key(conn NetConn, key string)
+	Get(key string) NetConn
+	Remove(conn NetConn)
+	Slice() []NetConn
+	Count() int
+	Heartbeat(conn NetConn)
+	Kick(key string)
+	Broadcast(data []byte, filter func(session NetSession) bool)
+	BroadcastAll(data []byte)
+	BroadcastOthers(mySession NetSession, data []byte)
+	BroadcastOne(data []byte, errFunc func(error)) error
+	Send(key string, data []byte)
+	MultiSend(keys []string, data []byte)
+	SetGroup(session NetSession, group string)
+	Group(group string, data []byte)
+	GroupOne(group string, data []byte, errFunc func(error))
+	CloseConnections()
+	Closed() bool
+	Destroy()
+}
+
+type netHub struct {
 	connections      map[string]NetConn
 	groupsConn       map[string][]NetConn
 	groupsRound      map[string]int
@@ -20,6 +51,7 @@ type NetHub struct {
 	addChan          chan *chanData
 	getChan          chan *chanData
 	hasChan          chan *chanData
+	sendChan         chan *chanData
 	sliceChan        chan *chanData
 	keyChan          chan *chanData
 	removeChan       chan NetConn
@@ -27,7 +59,7 @@ type NetHub struct {
 	heartbeat        bool
 	heartbeatTicker  *time.Ticker
 	heartbeatTimeout time.Duration
-	kickChan         chan func(session NetSession) bool
+	kickChan         chan string
 	broadcastChan    chan *chanData
 	closing          chan bool
 	closed           bool
@@ -36,8 +68,9 @@ type NetHub struct {
 
 type chanData struct {
 	conn    NetConn
-	conns    []NetConn
+	conns   []NetConn
 	key     string
+	keys    []string
 	value   interface{}
 	one     bool
 	group   string
@@ -45,10 +78,10 @@ type chanData struct {
 	filter  func(session NetSession) bool
 	once    bool
 	errFunc func(err error)
-	wg sync.WaitGroup
+	wg      sync.WaitGroup
 }
 
-func (hub *NetHub) Start() {
+func (hub *netHub) start() {
 	hub.connections = make(map[string]NetConn)
 	hub.groupsConn = make(map[string][]NetConn)
 	hub.groupsRound = make(map[string]int)
@@ -56,9 +89,10 @@ func (hub *NetHub) Start() {
 	hub.keyChan = make(chan *chanData, 100)
 	hub.getChan = make(chan *chanData, 1)
 	hub.hasChan = make(chan *chanData, 1)
+	hub.sendChan = make(chan *chanData, 1)
 	hub.sliceChan = make(chan *chanData, 1)
 	hub.removeChan = make(chan NetConn, 100)
-	hub.kickChan = make(chan func(session NetSession) bool, 10)
+	hub.kickChan = make(chan string, 10)
 	hub.broadcastChan = make(chan *chanData, 1000)
 	hub.closing = make(chan bool, 1)
 	hub.wg.Add(1)
@@ -77,7 +111,7 @@ func (hub *NetHub) Start() {
 	}()
 }
 
-func (hub *NetHub) do() (cond bool) {
+func (hub *netHub) do() (cond bool) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -99,16 +133,11 @@ func (hub *NetHub) do() (cond bool) {
 		hub.size++
 		log4g.Debug("connection count: %d", len(hub.connections))
 		cData.wg.Done()
-	case filter := <-hub.kickChan:
-		if filter != nil {
-			for _, conn := range hub.connections {
-				if filter(conn.Session()) {
-					conn.Close()
-					hub._delete(conn)
-					log4g.Warn("kicked connection %s", conn.RemoteAddr().String())
-					break
-				}
-			}
+	case key := <-hub.kickChan:
+		if conn, ok := hub.connections[key]; ok {
+			conn.Close()
+			hub._delete(conn)
+			log4g.Warn("kicked connection %s", conn.RemoteAddr().String())
 		}
 	case cData := <-hub.keyChan:
 		if _, ok := hub.connections[cData.key]; ok {
@@ -117,6 +146,7 @@ func (hub *NetHub) do() (cond bool) {
 		delete(hub.connections, cData.conn.Session().GetString(SESSION_CONNECT_KEY))
 		cData.conn.Session().Set(SESSION_CONNECT_KEY, cData.key)
 		hub.connections[cData.key] = cData.conn
+		cData.wg.Done()
 		log4g.Debug("connection count: %d", len(hub.connections))
 	case cData := <-hub.getChan:
 		cData.conn = hub.connections[cData.key]
@@ -130,6 +160,12 @@ func (hub *NetHub) do() (cond bool) {
 			}
 		}
 		cData.wg.Done()
+	case cData := <-hub.sendChan:
+		for _, key := range cData.keys {
+			if _conn, ok := hub.connections[key]; ok {
+				_conn.Write(cData.data)
+			}
+		}
 	case cData := <-hub.sliceChan:
 		for _, conn := range hub.connections {
 			cData.conns = append(cData.conns, conn)
@@ -156,7 +192,7 @@ func (hub *NetHub) do() (cond bool) {
 				}
 				log4g.Trace("group size: %d, round robin: %d", connCount, hub.lbRound)
 				err := hub.lbConnections[hub.lbRound].Write(cData.data)
-				if err != nil &&cData.errFunc != nil {
+				if err != nil && cData.errFunc != nil {
 					cData.errFunc(err)
 				}
 				hub.lbRound++
@@ -165,7 +201,7 @@ func (hub *NetHub) do() (cond bool) {
 				log4g.Error(err)
 				cData.errFunc(err)
 			}
-		} else if cData.group != "" {// Send to group
+		} else if cData.group != "" { // Send to group
 			log4g.Debug("send to group %s", cData.group)
 			conns := hub.groupsConn[cData.group]
 			if cData.once { // send to group's one by round robin
@@ -191,13 +227,13 @@ func (hub *NetHub) do() (cond bool) {
 					conn.Write(cData.data)
 				}
 			}
-		} else {// broadcast by filter
+		} else { // broadcast by filter
 			//log4g.Debug("broadcast to %d connections", len(hub.connections))
 			for _, conn := range hub.connections {
 				if cData.filter == nil || cData.filter(conn.Session()) {
 					conn.Write(cData.data)
 					if log4g.IsDebugEnabled() {
-						log4g.Debug("[broadcast] sent to %s", conn.Session().Get(SESSION_ID))
+						//log4g.Debug("[broadcast] sent to %s", conn.Session().Get(SESSION_ID))
 					}
 					if cData.once {
 						break
@@ -212,7 +248,7 @@ func (hub *NetHub) do() (cond bool) {
 	return true
 }
 
-func (hub *NetHub) _delete(conn NetConn) {
+func (hub *netHub) _delete(conn NetConn) {
 	delete(hub.connections, conn.Session().GetString(SESSION_CONNECT_KEY))
 	for i, _conn := range hub.lbConnections {
 		if _conn == conn {
@@ -235,14 +271,7 @@ func (hub *NetHub) _delete(conn NetConn) {
 	hub.size--
 }
 
-func (hub *NetHub) SetKey(conn NetConn, key string) {
-	cData := new(chanData)
-	cData.conn = conn
-	cData.key = key
-	hub.keyChan <- cData
-}
-
-func (hub *NetHub) Add(key string, conn NetConn) {
+func (hub *netHub) Add(key string, conn NetConn) {
 	hub.Heartbeat(conn)
 	cData := new(chanData)
 	cData.key = key
@@ -252,7 +281,16 @@ func (hub *NetHub) Add(key string, conn NetConn) {
 	cData.wg.Wait()
 }
 
-func (hub *NetHub) Get(key string) NetConn {
+func (hub *netHub) Key(conn NetConn, key string) {
+	cData := new(chanData)
+	cData.conn = conn
+	cData.key = key
+	cData.wg.Add(1)
+	hub.keyChan <- cData
+	cData.wg.Wait()
+}
+
+func (hub *netHub) Get(key string) NetConn {
 	cData := new(chanData)
 	cData.key = key
 	cData.wg.Add(1)
@@ -261,23 +299,11 @@ func (hub *NetHub) Get(key string) NetConn {
 	return cData.conn
 }
 
-func (hub *NetHub) HasSession(k string, v interface{}) bool {
-	log4g.Trace("has session: key=%s,val=%s", k, v)
-	cData := new(chanData)
-	cData.wg.Add(1)
-	cData.key = k
-	cData.value = v
-	hub.hasChan <- cData
-	cData.wg.Wait()
-	log4g.Trace("has session: %v",  cData.one)
-	return cData.one
-}
-
-func (hub *NetHub) Remove(conn NetConn) {
+func (hub *netHub) Remove(conn NetConn) {
 	hub.removeChan <- conn
 }
 
-func (hub *NetHub) Slice() []NetConn {
+func (hub *netHub) Slice() []NetConn {
 	cData := new(chanData)
 	cData.wg.Add(1)
 	hub.sliceChan <- cData
@@ -285,73 +311,39 @@ func (hub *NetHub) Slice() []NetConn {
 	return cData.conns
 }
 
-func (hub *NetHub) Heartbeat(conn NetConn) {
+func (hub *netHub) Count() int {
+	return hub.size
+}
+
+func (hub *netHub) Heartbeat(conn NetConn) {
 	if hub.heartbeat {
 		conn.Session().Set(HEART_BEAT_LAST_TIME, time.Now().UnixNano())
 	}
 }
 
-func (hub *NetHub) Kick(filter func(session NetSession) bool) {
-	hub.kickChan <- filter
+func (hub *netHub) Kick(key string) {
+	hub.kickChan <- key
 }
 
-func (hub *NetHub) Broadcast(data []byte, filter func(session NetSession) bool) {
+func (hub *netHub) Broadcast(data []byte, filter func(session NetSession) bool) {
 	cData := new(chanData)
 	cData.data = data
 	cData.filter = filter
 	hub.broadcastChan <- cData
 }
 
-func (hub *NetHub) BroadcastAll(data []byte) {
+func (hub *netHub) BroadcastAll(data []byte) {
 	hub.Broadcast(data, nil)
 }
 
-func (hub *NetHub) BroadcastOthers(mySession NetSession, data []byte) {
+func (hub *netHub) BroadcastOthers(mySession NetSession, data []byte) {
 	hub.Broadcast(data, func(session NetSession) bool {
 		return mySession != session
 	})
 }
 
-func (hub *NetHub) Someone(data []byte, filter func(session NetSession) bool) {
-	cData := new(chanData)
-	cData.data = data
-	cData.filter = filter
-	cData.once = true
-	hub.broadcastChan <- cData
-}
 
-func (hub *NetHub) SetGroup(session NetSession, group string) {
-	if group != "" {
-		hub.groupMutex.Lock()
-		conn := hub.Get(session.GetString(SESSION_CONNECT_KEY))
-		if conn != nil {
-			groups := hub.groupsConn[group]
-			hub.groupsConn[group] = append(groups, conn)
-			session.Set(SESSION_GROUP_NAME, group)
-			log4g.Debug("set group %s for %s", group, conn.RemoteAddr().String())
-			log4g.Debug("group size: %d", len(hub.groupsConn[group]))
-		}
-		hub.groupMutex.Unlock()
-	}
-}
-
-func (hub *NetHub) Group(group string, data []byte) {
-	cData := new(chanData)
-	cData.group = group
-	cData.data = data
-	hub.broadcastChan <- cData
-}
-
-func (hub *NetHub) GroupOne(group string, data []byte, errFunc func(error)) {
-	cData := new(chanData)
-	cData.group = group
-	cData.data = data
-	cData.once = true
-	cData.errFunc = errFunc
-	hub.broadcastChan <- cData
-}
-
-func (hub *NetHub) One(data []byte, errFunc func(error)) error {
+func (hub *netHub) BroadcastOne(data []byte, errFunc func(error)) error {
 
 	if !hub.enableLB {
 		panic("required to enable load balance")
@@ -371,19 +363,61 @@ func (hub *NetHub) One(data []byte, errFunc func(error)) error {
 	return nil
 }
 
-func (hub *NetHub) CloseConnections() {
+func (hub *netHub) Send(key string, data []byte) {
+	hub.MultiSend([]string{key}, data)
+}
+
+func (hub *netHub) MultiSend(keys []string, data []byte) {
+	cData := new(chanData)
+	cData.keys = keys
+	cData.data = data
+	hub.sendChan <- cData
+}
+
+
+func (hub *netHub) SetGroup(session NetSession, group string) {
+	if group != "" {
+		hub.groupMutex.Lock()
+		conn := hub.Get(session.GetString(SESSION_CONNECT_KEY))
+		if conn != nil {
+			groups := hub.groupsConn[group]
+			hub.groupsConn[group] = append(groups, conn)
+			session.Set(SESSION_GROUP_NAME, group)
+			log4g.Debug("set group %s for %s", group, conn.RemoteAddr().String())
+			log4g.Debug("group size: %d", len(hub.groupsConn[group]))
+		}
+		hub.groupMutex.Unlock()
+	}
+}
+
+func (hub *netHub) Group(group string, data []byte) {
+	cData := new(chanData)
+	cData.group = group
+	cData.data = data
+	hub.broadcastChan <- cData
+}
+
+func (hub *netHub) GroupOne(group string, data []byte, errFunc func(error)) {
+	cData := new(chanData)
+	cData.group = group
+	cData.data = data
+	cData.once = true
+	cData.errFunc = errFunc
+	hub.broadcastChan <- cData
+}
+
+func (hub *netHub) CloseConnections() {
 	for _, conn := range hub.connections {
 		conn.Close()
 	}
 	log4g.Debug("closed %d connections", len(hub.connections))
 }
 
-func (hub *NetHub) Closed() bool {
+func (hub *netHub) Closed() bool {
 	return hub.closed
 }
 
-
-func (hub *NetHub) Destroy() {
+func (hub *netHub) Destroy() {
 	hub.closing <- true
 	hub.wg.Wait()
 	//close(hub.addChan)

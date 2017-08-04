@@ -93,12 +93,14 @@ type NetAgent interface {
 	Msg() interface{}
 	RemoteAddr() net.Addr
 	Session() NetSession
+	Key(key string)
 	Write(v interface{}, prefix ...byte) error
 	Close()
 }
 
-func newNetAgent(conn NetConn, rp *RawPack, msg interface{}, serializer Serializer) *netAgent {
+func newNetAgent(hub NetHub, conn NetConn, rp *RawPack, msg interface{}, serializer Serializer) *netAgent {
 	agent := new(netAgent)
+	agent.hub = hub
 	agent.conn = conn
 	agent.rp = rp
 	agent.msg = msg
@@ -109,6 +111,7 @@ func newNetAgent(conn NetConn, rp *RawPack, msg interface{}, serializer Serializ
 }
 
 type netAgent struct {
+	hub        NetHub
 	conn       NetConn
 	prefix     []byte
 	rp         *RawPack
@@ -132,6 +135,10 @@ func (a *netAgent) RemoteAddr() net.Addr {
 
 func (a *netAgent) Session() NetSession {
 	return a.session
+}
+
+func (a *netAgent) Key(key string) {
+	a.hub.Key(a.conn, key)
 }
 
 func (a *netAgent) Write(v interface{}, prefix ...byte) error {
