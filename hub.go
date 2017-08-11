@@ -97,7 +97,7 @@ func (hub *netHub) start() {
 	hub.closing = make(chan bool, 1)
 	hub.wg.Add(1)
 	go func() {
-		hub.heartbeatTimeout = NetConfig.HeartbeatFrequency + NetConfig.NetTolerableTime
+		hub.heartbeatTimeout = (NetConfig.HeartbeatFrequency + NetConfig.NetTolerableTime) * time.Second
 		hub.heartbeatTicker = time.NewTicker(HEART_BEAT_INTERVAL)
 		if !hub.heartbeat {
 			hub.heartbeatTicker.Stop()

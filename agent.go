@@ -14,6 +14,7 @@ type NetSession interface {
 	GetBool(key string, defaultValue ...bool) bool
 	Has(key string) bool
 	Remove(key string)
+	Key() string
 }
 
 func NewNetSession() NetSession {
@@ -84,26 +85,32 @@ func (s *netSession) Has(key string) bool {
 	return s.map_data.Has(key)
 }
 
-func (s *netSession) Remove(key string) ()  {
+func (s *netSession) Remove(key string) {
 	s.map_data.Remove(key)
+}
+
+func (s *netSession) Key() string {
+	return s.GetString(SESSION_CONNECT_KEY)
 }
 
 type NetAgent interface {
 	RawPack() *RawPack
+	Header() interface{}
 	Msg() interface{}
 	RemoteAddr() net.Addr
 	Session() NetSession
 	Key(key string)
-	Write(v interface{}, prefix ...byte) error
+	Write(v interface{}, h ...interface{}) error
 	Close()
 }
 
-func newNetAgent(hub NetHub, conn NetConn, rp *RawPack, msg interface{}, serializer Serializer) *netAgent {
+func newNetAgent(hub NetHub, conn NetConn, rp *RawPack, msg, header interface{}, serializer Serializer) *netAgent {
 	agent := new(netAgent)
 	agent.hub = hub
 	agent.conn = conn
 	agent.rp = rp
 	agent.msg = msg
+	agent.header = header
 	agent.remoteAddr = conn.RemoteAddr()
 	agent.session = conn.Session()
 	agent.serializer = serializer
@@ -116,6 +123,7 @@ type netAgent struct {
 	prefix     []byte
 	rp         *RawPack
 	msg        interface{}
+	header     interface{}
 	remoteAddr net.Addr
 	session    NetSession
 	serializer Serializer
@@ -123,6 +131,10 @@ type netAgent struct {
 
 func (a *netAgent) RawPack() *RawPack {
 	return a.rp
+}
+
+func (a *netAgent) Header() interface{} {
+	return a.header
 }
 
 func (a *netAgent) Msg() interface{} {
@@ -141,8 +153,8 @@ func (a *netAgent) Key(key string) {
 	a.hub.Key(a.conn, key)
 }
 
-func (a *netAgent) Write(v interface{}, prefix ...byte) error {
-	data, err := Serialize(a.serializer, v, prefix...)
+func (a *netAgent) Write(v interface{}, h ...interface{}) error {
+	data, err := Serialize(a.serializer, v, h...)
 	if err != nil {
 		return err
 	}

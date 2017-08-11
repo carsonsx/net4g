@@ -30,19 +30,24 @@ func newTcpConn(conn net.Conn) *tcpNetConn {
 	tcp.closeChan = make(chan bool)
 	tcp.session = NewNetSession()
 	tcp.session.Set(SESSION_CONNECT_ESTABLISH_TIME, time.Now())
+	if NetConfig.ReadMode == READ_MODE_BEGIN_END {
+		tcp.buffer = make([]byte, NetConfig.MaxLength)
+	}
 	tcp.startWriting()
 	return tcp
 }
 
 type tcpNetConn struct {
-	conn            net.Conn
-	session         NetSession
-	writeChan       chan []byte
-	readChan        chan []byte
-	closeChan       chan bool
-	closed          bool
-	closeMutex      sync.Mutex
-	closeWG         sync.WaitGroup
+	conn       net.Conn
+	session    NetSession
+	writeChan  chan []byte
+	readChan   chan []byte
+	closeChan  chan bool
+	closed     bool
+	closeMutex sync.Mutex
+	closeWG    sync.WaitGroup
+	buffer     []byte
+	offset     int
 }
 
 func (c *tcpNetConn) RemoteAddr() net.Addr {
@@ -50,23 +55,82 @@ func (c *tcpNetConn) RemoteAddr() net.Addr {
 }
 
 func (c *tcpNetConn) Read() (data []byte, err error) {
-	header := make([]byte, NetConfig.MessageLengthSize)
-	_, err = io.ReadFull(c.conn, header)
-	if err != nil {
-		if err != io.EOF {
-			log4g.Error(err)
-		}
-		return
-	}
-	msgLen := util.GetIntHeader(header, NetConfig.MessageLengthSize, NetConfig.LittleEndian)
-	data = make([]byte, msgLen)
-	if msgLen > 0 {
-		_, err = io.ReadFull(c.conn, data)
+
+	if NetConfig.ReadMode == READ_MODE_BY_LENGTH {
+
+		header := make([]byte, NetConfig.LengthSize)
+		_, err = io.ReadFull(c.conn, header)
 		if err != nil {
-			log4g.Error(err)
+			if err != io.EOF {
+				log4g.Error(err)
+			}
 			return
 		}
+		msgLen := util.GetIntHeader(header[NetConfig.LengthIndex:], NetConfig.LengthSize, NetConfig.LittleEndian)
+		data = make([]byte, msgLen)
+		if msgLen > 0 {
+			_, err = io.ReadFull(c.conn, data)
+			if err != nil {
+				log4g.Error(err)
+				return
+			}
+		}
+	} else if NetConfig.ReadMode == READ_MODE_BEGIN_END {
+
+		foundBegin := false
+		foundEnd := false
+
+		for {
+			var n int
+			n, err = c.conn.Read(c.buffer[c.offset:])
+			if err != nil {
+				if err != io.EOF {
+					log4g.Error(err)
+				}
+				return
+			}
+			c.offset += n
+			var begin int
+			for i, b := range c.buffer {
+
+				if !foundBegin {
+					foundBegin = true
+					for j, bb := range NetConfig.BeginBytes {
+						if c.buffer[i+j] != bb {
+							foundBegin = false
+							break
+						}
+					}
+					if foundBegin {
+						begin = i + len(NetConfig.BeginBytes)
+					}
+				}
+
+				if !foundEnd {
+					foundEnd = true
+					for j, bb := range NetConfig.EndBytes {
+						if c.buffer[i+j] != bb {
+							foundEnd = false
+							break
+						}
+					}
+				}
+
+				if foundEnd {
+					c.offset = 0
+					return
+				}
+
+				if foundBegin && i >= begin && !foundEnd {
+					data = append(data, b)
+				}
+			}
+		}
+
+	} else {
+		panic("Wrong read mode")
 	}
+
 	if log4g.IsTraceEnabled() {
 		log4g.Trace("read: %v", data)
 		//log4g.Trace("read: %v", string(data))
@@ -85,7 +149,17 @@ func (c *tcpNetConn) startWriting() {
 			case <-c.closeChan:
 				break outer
 			case data := <-c.writeChan:
-				pack := util.AddIntHeader(data, NetConfig.MessageLengthSize, uint64(len(data)), NetConfig.LittleEndian)
+				var pack []byte
+				if NetConfig.ReadMode == READ_MODE_BY_LENGTH {
+					pack = util.AddIntHeader(data, NetConfig.LengthSize, uint64(len(data)), NetConfig.LittleEndian)
+				} else if NetConfig.ReadMode == READ_MODE_BEGIN_END {
+					newData := append(data, NetConfig.EndBytes...)
+					pack = make([]byte, len(NetConfig.BeginBytes)+len(newData))
+					copy(pack, NetConfig.BeginBytes)
+					copy(pack[len(NetConfig.BeginBytes):], newData)
+				} else {
+					panic("Wrong read mode")
+				}
 				_, err := c.conn.Write(pack)
 				if err != nil {
 					log4g.Error(err)
@@ -96,7 +170,8 @@ func (c *tcpNetConn) startWriting() {
 				} else {
 					c.session.Set(SESSION_CONNECT_LAST_WRITE_TIME, time.Now())
 					if log4g.IsTraceEnabled() {
-						log4g.Trace("written: %v", data)
+						log4g.Trace("written data: %v", data)
+						log4g.Trace("written pack: %v", pack)
 					}
 				}
 			}

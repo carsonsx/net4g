@@ -128,7 +128,7 @@ func (s *tcpServer) listen() {
 		//new event
 		conn := newTcpConn(netconn)
 		s.hub.Add(conn.RemoteAddr().String(), conn)
-		agent := newNetAgent(s.hub, conn, nil, nil, s.serializer)
+		agent := newNetAgent(s.hub, conn, nil, nil, nil, s.serializer)
 		for _, d := range s.dispatchers {
 			d.handleConnectionCreated(agent)
 		}

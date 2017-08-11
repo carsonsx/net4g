@@ -5,7 +5,6 @@ import (
 	"github.com/carsonsx/log4g"
 	"runtime/debug"
 	"time"
-	"fmt"
 )
 
 func IsHeartbeatData(data []byte) bool {
@@ -62,24 +61,10 @@ func (r *netReader) process(raw []byte, after func(data []byte) bool) {
 		}
 	}
 
-	var prefix []byte
-
-	if NetConfig.MessagePrefixSize > 0 {
-		if len(raw) < NetConfig.MessagePrefixSize {
-			text := fmt.Sprintf("message length [%d] is short than prefix size [%d]", len(raw), NetConfig.MessagePrefixSize)
-			log4g.Error(text)
-			return
-		}
-		prefix = raw[:NetConfig.MessagePrefixSize]
-		raw = raw[NetConfig.MessagePrefixSize:]
-	}
-
-	v, rp, err := r.serializer.Deserialize(raw)
+	v, h, rp, err := r.serializer.Deserialize(raw)
 	if err != nil {
 		return
 	}
 
-	rp.Prefix = prefix
-
-	Dispatch(r.dispatchers, newNetAgent(r.hub, r.conn, rp, v, r.serializer))
+	Dispatch(r.dispatchers, newNetAgent(r.hub, r.conn, rp, v, h, r.serializer))
 }

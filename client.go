@@ -59,7 +59,7 @@ func (c *TCPClient) DisableAutoReconnect() *TCPClient {
 	return c
 }
 
-func (c *TCPClient) Start() *TCPClient {
+func (c *TCPClient) Connect() *TCPClient {
 
 	// Init the connection manager
 	c.hub = NewNetHub(c.heartbeat, true)
@@ -84,7 +84,7 @@ func (c *TCPClient) Start() *TCPClient {
 	c.firstConnected.Wait()
 
 	if c.heartbeat {
-		timer := time.NewTicker(NetConfig.HeartbeatFrequency)
+		timer := time.NewTicker(NetConfig.HeartbeatFrequency * time.Second)
 		if c.heartbeatData == nil {
 			c.heartbeatData = []byte{}
 		}
@@ -122,7 +122,7 @@ func (c *TCPClient) doConnect(addr *NetAddr) {
 				return true
 			})
 			c.hub.Remove(conn)
-			agent := newNetAgent(c.hub, conn, nil, nil, c.serializer)
+			agent := newNetAgent(c.hub, conn, nil, nil, nil, c.serializer)
 			for _, d := range c.dispatchers {
 				d.handleConnectionClosed(agent)
 			}
@@ -164,7 +164,7 @@ func (c *TCPClient) connect(name, addr string) (conn NetConn, err error) {
 		}
 	}
 	c.hub.Add(name, conn)
-	agent := newNetAgent(c.hub, conn, nil, nil, c.serializer)
+	agent := newNetAgent(c.hub, conn, nil, nil, nil, c.serializer)
 	for _, d := range c.dispatchers {
 		d.handleConnectionCreated(agent)
 	}
