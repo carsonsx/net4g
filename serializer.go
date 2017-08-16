@@ -60,6 +60,8 @@ func (rp *RawPack) StringId() string {
 type Serializer interface {
 	SetIdInitValue(id int)
 	RegisterId(v interface{}, one_id ...interface{}) (id interface{}, err error)
+	RegisterSerializeId(v interface{}, one_id ...interface{}) (id interface{}, err error)
+	RegisterDeserializeId(v interface{}, one_id ...interface{}) (id interface{}, err error)
 	Serialize(v, h interface{}) (data []byte, err error)
 	Deserialize(raw []byte) (v, h interface{}, rp *RawPack, err error)
 	RangeId(f func(id interface{}, t reflect.Type))
@@ -84,11 +86,31 @@ type EmptySerializer struct {
 	id                    int
 }
 
+type registerType int
+
+const (
+	register_serialize registerType = iota
+	register_deserialize
+	register_both
+)
+
 func (s *EmptySerializer) SetIdInitValue(id int) {
 	s.id = id
 }
 
 func (s *EmptySerializer) RegisterId(v interface{}, one_id ...interface{}) (id interface{}, err error) {
+	return s.register(register_both, v, one_id...)
+}
+
+func (s *EmptySerializer) RegisterSerializeId(v interface{}, one_id ...interface{}) (id interface{}, err error) {
+	return s.register(register_serialize, v, one_id...)
+}
+
+func (s *EmptySerializer) RegisterDeserializeId(v interface{}, one_id ...interface{}) (id interface{}, err error) {
+	return s.register(register_deserialize, v, one_id...)
+}
+
+func (s *EmptySerializer) register(rt registerType, v interface{}, one_id ...interface{}) (id interface{}, err error) {
 
 	t := reflect.TypeOf(v)
 	if t == nil || t.Kind() != reflect.Ptr {
@@ -99,12 +121,6 @@ func (s *EmptySerializer) RegisterId(v interface{}, one_id ...interface{}) (id i
 		panic("one id one type")
 	}
 
-	if _id, ok := s.SerializerIdTypeMap[t]; ok {
-		text := fmt.Sprintf("%s has been registered by %d", t.String(), _id)
-		log4g.Error(text)
-		return 0, errors.New(text)
-	}
-
 	if len(one_id) == 1 {
 		id = one_id[0]
 	} else {
@@ -113,13 +129,19 @@ func (s *EmptySerializer) RegisterId(v interface{}, one_id ...interface{}) (id i
 	}
 
 	// register for serialize and deserialize
-	s.SerializerTypeIdMap[t] = id
-	s.DeserializerTypeIdMap[t] = id
-	s.SerializerIdTypeMap[id] = t
-	s.DeserializerIdTypeMap[id] = t
-	s.ids = append(s.ids, id)
 
-	log4g.Info("registered id[%v] for type[%v]", id, t)
+	if rt == register_both || rt == register_serialize {
+		s.SerializerTypeIdMap[t] = id
+		s.SerializerIdTypeMap[id] = t
+		s.ids = append(s.ids, id)
+		log4g.Info("registered   serialize mapping relations between id[%v] and type[%v]", id, t)
+	}
+	if rt == register_both || rt == register_deserialize {
+		s.DeserializerTypeIdMap[t] = id
+		s.DeserializerIdTypeMap[id] = t
+		s.ids = append(s.ids, id)
+		log4g.Info("registered deserialize mapping relations between id[%v] and type[%v]", id, t)
+	}
 
 	return
 }

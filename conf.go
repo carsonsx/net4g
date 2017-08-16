@@ -32,9 +32,9 @@ type netConfig struct {
 	KeepWriteData      bool          `json:"keep_write_data"`
 }
 
-func (c *netConfig) Print()  {
+func (c *netConfig) Print() {
 	log4g.Info("Net4g Config:")
-	log4g.JsonInfo(&NetConfig)
+	log4g.Info(log4g.JsonFunc(&NetConfig))
 }
 
 var searchPath = []string{"", "conf/", "config/"}

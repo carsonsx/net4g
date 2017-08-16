@@ -34,7 +34,6 @@ type tcpServer struct {
 	statusMonitor bool
 }
 
-
 func (s *tcpServer) SetSerializer(serializer Serializer) *tcpServer {
 	s.serializer = serializer
 	return s

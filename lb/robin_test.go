@@ -1,12 +1,12 @@
 package lb_test
 
 import (
+	"fmt"
+	"github.com/carsonsx/log4g"
 	"github.com/carsonsx/net4g/lb"
+	"github.com/hashicorp/consul/api"
 	"testing"
 	"time"
-	"github.com/carsonsx/log4g"
-	"github.com/hashicorp/consul/api"
-	"fmt"
 )
 
 var balance = new(lb.RoundRobinLoadBalance)

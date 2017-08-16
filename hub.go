@@ -131,13 +131,14 @@ func (hub *netHub) do() (cond bool) {
 			hub.lbConnections = append(hub.lbConnections, cData.conn)
 		}
 		hub.size++
-		log4g.Debug("connection count: %d", len(hub.connections))
+		log4g.Info("connection count: %d", len(hub.connections))
 		cData.wg.Done()
 	case key := <-hub.kickChan:
 		if conn, ok := hub.connections[key]; ok {
 			conn.Close()
 			hub._delete(conn)
 			log4g.Warn("kicked connection %s", conn.RemoteAddr().String())
+			log4g.Info("connection count: %d", len(hub.connections))
 		}
 	case cData := <-hub.keyChan:
 		if _, ok := hub.connections[cData.key]; ok {
@@ -173,6 +174,8 @@ func (hub *netHub) do() (cond bool) {
 		cData.wg.Done()
 	case conn := <-hub.removeChan:
 		hub._delete(conn)
+		log4g.Info("removed connection: %s", conn.Session().Get(SESSION_CONNECT_KEY))
+		log4g.Info("connection count: %d", len(hub.connections))
 	case t := <-hub.heartbeatTicker.C:
 		for _, conn := range hub.connections {
 			if t.UnixNano() > conn.Session().GetInt64(HEART_BEAT_LAST_TIME)+hub.heartbeatTimeout.Nanoseconds() {
@@ -342,7 +345,6 @@ func (hub *netHub) BroadcastOthers(mySession NetSession, data []byte) {
 	})
 }
 
-
 func (hub *netHub) BroadcastOne(data []byte, errFunc func(error)) error {
 
 	if !hub.enableLB {
@@ -373,7 +375,6 @@ func (hub *netHub) MultiSend(keys []string, data []byte) {
 	cData.data = data
 	hub.sendChan <- cData
 }
-
 
 func (hub *netHub) SetGroup(session NetSession, group string) {
 	if group != "" {

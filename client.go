@@ -102,7 +102,6 @@ func (c *TCPClient) Connect() *TCPClient {
 	return c
 }
 
-
 func (c *TCPClient) doConnect(addr *NetAddr) {
 
 	var connected bool

@@ -1,11 +1,11 @@
 package net4g
 
 import (
+	"fmt"
 	"github.com/carsonsx/log4g"
 	"reflect"
 	"runtime/debug"
 	"sync"
-	"fmt"
 )
 
 func Dispatch(dispatchers []*dispatcher, agent NetAgent) {
@@ -65,9 +65,9 @@ type dispatcher struct {
 	connectionClosedHandlers  []func(agent NetAgent)
 	destroyChan               chan bool
 	destroyHandler            func()
-	goroutineNum             int
-	running                  bool
-	wg                       sync.WaitGroup
+	goroutineNum              int
+	running                   bool
+	wg                        sync.WaitGroup
 }
 
 func (p *dispatcher) AddHandler(h func(agent NetAgent), id_or_type ...interface{}) {
@@ -78,7 +78,7 @@ func (p *dispatcher) AddHandler(h func(agent NetAgent), id_or_type ...interface{
 
 		}
 		p.msgHandlers[id] = h
-		log4g.Info("dispatcher[%s] added a handler for %v", p.Name, id)
+		log4g.Info("dispatcher[%s] added a handler for id[%v]", p.Name, id)
 	} else {
 		p.globalHandlers = append(p.globalHandlers, h)
 		log4g.Info("dispatcher[%s] added global handler", p.Name)
@@ -89,7 +89,6 @@ func (p *dispatcher) OnConnectionCreated(h func(agent NetAgent)) {
 	p.connectionCreatedHandlers = append(p.connectionCreatedHandlers, h)
 }
 
-
 func (p *dispatcher) OnConnectionClosed(h func(agent NetAgent)) {
 	p.connectionClosedHandlers = append(p.connectionClosedHandlers, h)
 }
@@ -97,7 +96,6 @@ func (p *dispatcher) OnConnectionClosed(h func(agent NetAgent)) {
 func (p *dispatcher) OnDestroy(h func()) {
 	p.destroyHandler = h
 }
-
 
 func (p *dispatcher) listen() {
 	log4g.Info("dispatcher goroutine number: %d", p.goroutineNum)
@@ -178,7 +176,6 @@ func (p *dispatcher) dispatch(agent NetAgent) {
 	}
 }
 
-
 func (p *dispatcher) onConnectionCreatedHandlers(agent NetAgent) {
 
 	defer func() {
@@ -194,7 +191,6 @@ func (p *dispatcher) onConnectionCreatedHandlers(agent NetAgent) {
 		h(agent)
 	}
 }
-
 
 func (p *dispatcher) onConnectionClosedHandlers(agent NetAgent) {
 
@@ -229,7 +225,6 @@ func (p *dispatcher) onDestroyHandler() {
 		p.destroyHandler()
 	}
 }
-
 
 func (p *dispatcher) Kick(key string) {
 	p.hub.Kick(key)
@@ -338,7 +333,7 @@ func (p *dispatcher) handleConnectionClosed(agent NetAgent) {
 	log4g.Debug("handling closed session")
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
-	agent.Session().Set(p.Name + "-wg", wg)
+	agent.Session().Set(p.Name+"-wg", wg)
 	p.sessionClosedChan <- agent
 	wg.Wait()
 	agent.Session().Remove(p.Name + "wg")

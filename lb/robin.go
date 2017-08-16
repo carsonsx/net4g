@@ -6,10 +6,10 @@ import (
 )
 
 type RoundRobinLoadBalance struct {
-	selects []string
-	size    int
-	round   int
-	seedFunc    func() ([]string, error)
+	selects  []string
+	size     int
+	round    int
+	seedFunc func() ([]string, error)
 	sync.Mutex
 }
 
@@ -39,7 +39,7 @@ func (lb *RoundRobinLoadBalance) Remove(sel string) {
 	lb.size = len(lb.selects)
 }
 
-func (lb *RoundRobinLoadBalance) Start(seedFunc func() ([]string, error),  duration time.Duration) {
+func (lb *RoundRobinLoadBalance) Start(seedFunc func() ([]string, error), duration time.Duration) {
 	lb.seedFunc = seedFunc
 	lb.refresh()
 	if duration > 0 {
@@ -62,6 +62,3 @@ func (lb *RoundRobinLoadBalance) refresh() {
 		lb.size = len(lb.selects)
 	}
 }
-
-
-

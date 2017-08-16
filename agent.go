@@ -27,7 +27,7 @@ type netSession struct {
 	map_data util.Map
 }
 
-func (s *netSession) Set(key string, value interface{}) ()  {
+func (s *netSession) Set(key string, value interface{}) {
 	s.map_data.Put(key, value)
 }
 

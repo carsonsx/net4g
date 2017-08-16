@@ -28,7 +28,7 @@ type unsafeSet struct {
 }
 
 func (s *unsafeSet) Add(item interface{}) {
-	s.s[item] = struct {}{}
+	s.s[item] = struct{}{}
 }
 
 func (s *unsafeSet) Remove(item interface{}) {

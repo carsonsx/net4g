@@ -1,8 +1,8 @@
 package util
 
 import (
-	"testing"
 	"github.com/carsonsx/log4g"
+	"testing"
 )
 
 func TestMap(t *testing.T) {
