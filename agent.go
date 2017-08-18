@@ -102,6 +102,7 @@ type NetAgent interface {
 	Key(key string)
 	Write(v interface{}, h ...interface{}) error
 	Close()
+	IsClosed() bool
 }
 
 func newNetAgent(hub NetHub, conn NetConn, rp *RawPack, msg, header interface{}, serializer Serializer) *netAgent {
@@ -163,4 +164,8 @@ func (a *netAgent) Write(v interface{}, h ...interface{}) error {
 
 func (a *netAgent) Close() {
 	a.conn.Close()
+}
+
+func (a *netAgent) IsClosed() bool {
+	return a.conn.IsClosed()
 }

@@ -133,15 +133,15 @@ func (s *EmptySerializer) register(rt registerType, v interface{}, one_id ...int
 	if rt == register_both || rt == register_serialize {
 		s.SerializerTypeIdMap[t] = id
 		s.SerializerIdTypeMap[id] = t
-		s.ids = append(s.ids, id)
 		log4g.Info("registered   serialize mapping relations between id[%v] and type[%v]", id, t)
 	}
 	if rt == register_both || rt == register_deserialize {
 		s.DeserializerTypeIdMap[t] = id
 		s.DeserializerIdTypeMap[id] = t
-		s.ids = append(s.ids, id)
 		log4g.Info("registered deserialize mapping relations between id[%v] and type[%v]", id, t)
 	}
+
+	s.ids = append(s.ids, id)
 
 	return
 }
@@ -409,7 +409,7 @@ func (s *ProtobufSerializer) Serialize(v, h interface{}) (data []byte, err error
 		if id, ok := s.SerializerTypeIdMap[t]; ok {
 			data, err = proto.Marshal(v.(proto.Message))
 			if err != nil {
-				log4g.Error(err)
+				log4g.Error("[%v] %v", t, err)
 				return
 			}
 			data = util.AddIntHeader(data, NetConfig.IdSize, uint64(id.(int)), NetConfig.LittleEndian)

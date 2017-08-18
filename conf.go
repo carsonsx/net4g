@@ -30,6 +30,7 @@ type netConfig struct {
 	NetTolerableTime   time.Duration `json:"net_tolerable_time"`
 	IdSize             int           `json:"id_size"`
 	KeepWriteData      bool          `json:"keep_write_data"`
+	MonitorBeat        int           `json:"monitor_beat"`
 }
 
 func (c *netConfig) Print() {
@@ -50,6 +51,7 @@ func init() {
 	NetConfig.HeartbeatData = []byte{}
 	NetConfig.NetTolerableTime = 3 // second
 	NetConfig.IdSize = 2
+	NetConfig.MonitorBeat = 10 // second
 
 	searchJsonConfig("net4g.json", &NetConfig)
 }

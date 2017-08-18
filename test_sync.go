@@ -4,6 +4,8 @@ import (
 	"github.com/carsonsx/log4g"
 	"github.com/carsonsx/net4g/util"
 	"time"
+	"os"
+	"os/signal"
 )
 
 var _functions = util.NewQueue()
@@ -19,7 +21,12 @@ var done = make(chan bool)
 var closed bool
 
 func TestWait(delay ...int) {
-	<-done
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, os.Kill)
+	select {
+		case <-done:
+		case <- sig:
+	}
 	if len(delay) > 0 && delay[0] > 0 {
 		time.Sleep(time.Duration(delay[0]) * time.Second)
 	}

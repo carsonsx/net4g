@@ -15,7 +15,7 @@ type NetReader interface {
 	Read(after func(data []byte) bool)
 }
 
-func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher, hub NetHub) NetReader {
+func newNetReader(conn NetConn, serializer Serializer, dispatchers []*Dispatcher, hub NetHub) NetReader {
 	reader := new(netReader)
 	reader.conn = conn
 	reader.serializer = serializer
@@ -27,7 +27,7 @@ func newNetReader(conn NetConn, serializer Serializer, dispatchers []*dispatcher
 type netReader struct {
 	conn        NetConn
 	serializer  Serializer
-	dispatchers []*dispatcher
+	dispatchers []*Dispatcher
 	hub         NetHub
 }
 

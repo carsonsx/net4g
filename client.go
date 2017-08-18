@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"sync"
 	"time"
+	"runtime"
 )
 
 const (
@@ -14,8 +15,9 @@ const (
 	reconnect_delay_max = 10000
 )
 
-func NewTcpClient(addrFn func() (addrs []*NetAddr, err error)) *TCPClient {
+func NewTcpClient(name string, addrFn func() (addrs []*NetAddr, err error)) *TCPClient {
 	client := new(TCPClient)
+	client.name = name
 	client.addrFn = addrFn
 	client.AutoReconnect = true
 	client.reconnectDelay = reconnect_delay_min
@@ -24,17 +26,21 @@ func NewTcpClient(addrFn func() (addrs []*NetAddr, err error)) *TCPClient {
 }
 
 type TCPClient struct {
+	name string
 	addrFn         func() (addrs []*NetAddr, err error)
 	AutoReconnect  bool
 	reconnectDelay int
 	serializer     Serializer
-	dispatchers    []*dispatcher
+	dispatchers    []*Dispatcher
 	hub            NetHub
 	heartbeat      bool
 	heartbeatData  []byte
 	sig            chan os.Signal
 	closed         bool
 	firstConnected sync.WaitGroup
+	monitor     bool
+	monitorLog  *log4g.Loggers
+	startTime time.Time
 }
 
 func (c *TCPClient) SetSerializer(serializer Serializer) *TCPClient {
@@ -42,7 +48,7 @@ func (c *TCPClient) SetSerializer(serializer Serializer) *TCPClient {
 	return c
 }
 
-func (c *TCPClient) AddDispatchers(dispatchers ...*dispatcher) *TCPClient {
+func (c *TCPClient) AddDispatchers(dispatchers ...*Dispatcher) *TCPClient {
 	for _, d := range dispatchers {
 		c.dispatchers = append(c.dispatchers, d)
 	}
@@ -51,6 +57,12 @@ func (c *TCPClient) AddDispatchers(dispatchers ...*dispatcher) *TCPClient {
 
 func (c *TCPClient) EnableHeartbeat() *TCPClient {
 	c.heartbeat = true
+	return c
+}
+
+func (c *TCPClient) EnableMonitor(monitorLog *log4g.Loggers) *TCPClient {
+	c.monitor = true
+	c.monitorLog = monitorLog
 	return c
 }
 
@@ -85,16 +97,41 @@ func (c *TCPClient) Connect() *TCPClient {
 
 	if c.heartbeat {
 		timer := time.NewTicker(NetConfig.HeartbeatFrequency * time.Second)
-		if c.heartbeatData == nil {
-			c.heartbeatData = []byte{}
-		}
+		c.heartbeatData = NetConfig.HeartbeatData
 		go func() {
 			for {
 				if c.hub.Closed() {
 					break
 				}
+				log4g.Trace("[client] heart beat...")
 				c.hub.BroadcastAll(c.heartbeatData)
 				<-timer.C
+			}
+		}()
+	}
+
+	c.startTime = time.Now()
+
+	if c.monitor {
+		go func() {
+			ticker := time.NewTicker(time.Duration(NetConfig.MonitorBeat) * time.Second)
+			previousTime := c.startTime
+			for {
+				if c.closed {
+					ticker.Stop()
+					break
+				}
+				select {
+				case <- ticker.C:
+					trc, twc, prc, pwc := c.hub.PackCount()
+					now := time.Now()
+					duration := now.Sub(previousTime)
+					previousTime = now
+					c.monitorLog.Info("")
+					c.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", c.name, runtime.NumGoroutine(), c.hub.Count())
+					c.monitorLog.Info("*[%s message] read: %d, write: %d", c.name, trc, twc)
+					c.monitorLog.Info("*[%s per sec] read: %d, write: %d", c.name, prc * int64(time.Second) / int64(duration), pwc * int64(time.Second) / int64(duration))
+				}
 			}
 		}()
 	}
@@ -176,24 +213,24 @@ func (c *TCPClient) Close() {
 
 	//close all connections
 	c.hub.CloseConnections()
-	log4g.Info("closed client connections")
+	log4g.Info("closed client[%s] connections", c.name)
 
 	//close net hub
 	c.hub.Destroy()
-	log4g.Info("closed client hub")
+	log4g.Info("closed client[%s] hub", c.name)
 
 	//close dispatchers
 	for _, d := range c.dispatchers {
 		d.Destroy()
 	}
-	log4g.Info("closed client dispatcher")
+	log4g.Info("closed client[%s] dispatcher", c.name)
 
-	log4g.Info("closed client")
+	log4g.Info("closed client[%s]", c.name)
 
 }
 
 func (c *TCPClient) Wait() {
 	signal.Notify(c.sig, os.Interrupt, os.Kill, Terminal)
-	log4g.Info("client is closing with signal %v\n", <-c.sig)
+	log4g.Info("client[%s] is closing with signal %v\n", c.name, <-c.sig)
 	c.Close()
 }

@@ -20,7 +20,9 @@ type NetConn interface {
 	Write(p []byte) error
 	Session() NetSession
 	Close()
+	IsClosed() bool
 	NotWrittenData() [][]byte
+	PopCount() (read int64, write int64)
 }
 
 func newTcpConn(conn net.Conn) *tcpNetConn {
@@ -48,6 +50,8 @@ type tcpNetConn struct {
 	closeWG    sync.WaitGroup
 	buffer     []byte
 	offset     int
+	readCount  int64
+	writeCount int64
 }
 
 func (c *tcpNetConn) RemoteAddr() net.Addr {
@@ -135,6 +139,10 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 		log4g.Trace("read: %v", data)
 		//log4g.Trace("read: %v", string(data))
 	}
+
+	c.readCount++
+	//log4g.Info("read countMsg %d %s", c.readCount, c.RemoteAddr())
+
 	return
 }
 
@@ -173,9 +181,12 @@ func (c *tcpNetConn) startWriting() {
 						log4g.Trace("written data: %v", data)
 						log4g.Trace("written pack: %v", pack)
 					}
+					c.writeCount++
+					//log4g.Info("written countMsg %d %s", c.writtenCount, c.RemoteAddr())
 				}
 			}
 		}
+		c.closed = true
 	}()
 }
 
@@ -226,6 +237,19 @@ func (c *tcpNetConn) Close() {
 	log4g.Debug("closed connection %s", c.RemoteAddr().String())
 }
 
+
+func (c *tcpNetConn) IsClosed() bool {
+	return c.closed
+}
+
 func (c *tcpNetConn) Session() NetSession {
 	return c.session
+}
+
+func (c *tcpNetConn) PopCount() (read int64, write int64) {
+	read = c.readCount
+	c.readCount = 0
+	write = c.writeCount
+	c.writeCount = 0
+	return
 }

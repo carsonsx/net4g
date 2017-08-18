@@ -35,35 +35,41 @@ type NetHub interface {
 	SetGroup(session NetSession, group string)
 	Group(group string, data []byte)
 	GroupOne(group string, data []byte, errFunc func(error))
+	PackCount() (totalRead int64, totalWrite int64, popRead int64, popWrite int64)
 	CloseConnections()
 	Closed() bool
 	Destroy()
 }
 
 type netHub struct {
-	connections      map[string]NetConn
-	groupsConn       map[string][]NetConn
-	groupsRound      map[string]int
-	groupMutex       sync.Mutex
-	enableLB         bool
-	lbConnections    []NetConn
-	lbRound          int
-	addChan          chan *chanData
-	getChan          chan *chanData
-	hasChan          chan *chanData
-	sendChan         chan *chanData
-	sliceChan        chan *chanData
-	keyChan          chan *chanData
-	removeChan       chan NetConn
-	size             int
-	heartbeat        bool
-	heartbeatTicker  *time.Ticker
-	heartbeatTimeout time.Duration
-	kickChan         chan string
-	broadcastChan    chan *chanData
-	closing          chan bool
-	closed           bool
-	wg               sync.WaitGroup
+	connections       map[string]NetConn
+	groupsConn        map[string][]NetConn
+	groupsRound       map[string]int
+	groupMutex        sync.Mutex
+	enableLB          bool
+	lbConnections     []NetConn
+	lbRound           int
+	addChan           chan *chanData
+	getChan           chan *chanData
+	hasChan           chan *chanData
+	sendChan          chan *chanData
+	sliceChan         chan *chanData
+	keyChan           chan *chanData
+	removeChan        chan NetConn
+	countChan         chan *chanData
+	size              int
+	heartbeat         bool
+	heartbeatTicker   *time.Ticker
+	heartbeatTimeout  time.Duration
+	kickChan          chan string
+	broadcastChan     chan *chanData
+	closing           chan bool
+	closed            bool
+	wg                sync.WaitGroup
+	totalReadCount    int64
+	totalWrittenCount int64
+	popReadCount      int64
+	popWriteCount     int64
 }
 
 type chanData struct {
@@ -92,13 +98,15 @@ func (hub *netHub) start() {
 	hub.sendChan = make(chan *chanData, 1)
 	hub.sliceChan = make(chan *chanData, 1)
 	hub.removeChan = make(chan NetConn, 100)
+	hub.countChan = make(chan *chanData, 1)
 	hub.kickChan = make(chan string, 10)
 	hub.broadcastChan = make(chan *chanData, 1000)
 	hub.closing = make(chan bool, 1)
 	hub.wg.Add(1)
 	go func() {
 		hub.heartbeatTimeout = (NetConfig.HeartbeatFrequency + NetConfig.NetTolerableTime) * time.Second
-		hub.heartbeatTicker = time.NewTicker(HEART_BEAT_INTERVAL)
+		hub.heartbeatTicker = time.NewTicker(NetConfig.HeartbeatFrequency + NetConfig.NetTolerableTime)
+		//hub.heartbeatTicker = time.NewTicker(HEART_BEAT_INTERVAL)
 		if !hub.heartbeat {
 			hub.heartbeatTicker.Stop()
 		}
@@ -165,6 +173,19 @@ func (hub *netHub) do() (cond bool) {
 		for _, key := range cData.keys {
 			if _conn, ok := hub.connections[key]; ok {
 				_conn.Write(cData.data)
+			}
+		}
+		//do more
+		for i := 0; i < 5; i++ {
+			select {
+			case _data := <-hub.sendChan:
+				for _, key := range _data.keys {
+					if _conn, ok := hub.connections[key]; ok {
+						_conn.Write(cData.data)
+					}
+				}
+			default:
+				break
 			}
 		}
 	case cData := <-hub.sliceChan:
@@ -244,14 +265,27 @@ func (hub *netHub) do() (cond bool) {
 				}
 			}
 		}
+	case cData := <-hub.countChan:
+		for _, conn := range hub.connections {
+			rc, wc := conn.PopCount()
+			hub.totalReadCount += rc
+			hub.totalWrittenCount += wc
+			hub.popReadCount += rc
+			hub.popWriteCount += wc
+		}
+		cData.wg.Done()
 	case <-hub.closing:
 		return false
+
 	}
 
 	return true
 }
 
 func (hub *netHub) _delete(conn NetConn) {
+	if _, ok := hub.connections[conn.Session().GetString(SESSION_CONNECT_KEY)]; !ok {
+		return
+	}
 	delete(hub.connections, conn.Session().GetString(SESSION_CONNECT_KEY))
 	for i, _conn := range hub.lbConnections {
 		if _conn == conn {
@@ -405,6 +439,20 @@ func (hub *netHub) GroupOne(group string, data []byte, errFunc func(error)) {
 	cData.once = true
 	cData.errFunc = errFunc
 	hub.broadcastChan <- cData
+}
+
+func (hub *netHub) PackCount() (totalRead int64, totalWrite int64, popRead int64, popWrite int64) {
+	cData := new(chanData)
+	cData.wg.Add(1)
+	hub.countChan <- cData
+	cData.wg.Wait()
+	totalRead = hub.totalReadCount
+	totalWrite = hub.totalWrittenCount
+	popRead = hub.popReadCount
+	hub.popReadCount = 0
+	popWrite = hub.popWriteCount
+	hub.popWriteCount = 0
+	return
 }
 
 func (hub *netHub) CloseConnections() {

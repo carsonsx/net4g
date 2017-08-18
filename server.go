@@ -20,18 +20,20 @@ func NewTcpServer(name, addr string) *tcpServer {
 }
 
 type tcpServer struct {
-	Name          string
-	Addr          string
-	serializer    Serializer
-	dispatchers   []*dispatcher
-	mutex         sync.Mutex
-	hub           NetHub
-	heartbeat     bool
-	listener      net.Listener
-	closeConn     sync.WaitGroup
-	closeListen   sync.WaitGroup
-	started       bool
-	statusMonitor bool
+	Name        string
+	Addr        string
+	serializer  Serializer
+	dispatchers []*Dispatcher
+	mutex       sync.Mutex
+	hub         NetHub
+	heartbeat   bool
+	listener    net.Listener
+	closeConn   sync.WaitGroup
+	closeListen sync.WaitGroup
+	closed     bool
+	monitor     bool
+	monitorLog  *log4g.Loggers
+	startTime time.Time
 }
 
 func (s *tcpServer) SetSerializer(serializer Serializer) *tcpServer {
@@ -39,10 +41,10 @@ func (s *tcpServer) SetSerializer(serializer Serializer) *tcpServer {
 	return s
 }
 
-func (s *tcpServer) AddDispatchers(dispatchers ...*dispatcher) *tcpServer {
+func (s *tcpServer) AddDispatchers(dispatchers ...*Dispatcher) *tcpServer {
 	for _, d := range dispatchers {
 		if d.serializer != nil {
-			panic(fmt.Sprintf("dispatcher [%s] has bind with server [%s]", d.Name, s.Name))
+			panic(fmt.Sprintf("Dispatcher [%s] has bind with server [%s]", d.Name, s.Name))
 		}
 		d.serializer = s.serializer
 		d.hub = s.hub
@@ -56,8 +58,9 @@ func (s *tcpServer) EnableHeartbeat() *tcpServer {
 	return s
 }
 
-func (s *tcpServer) EnableStatusMonitor() *tcpServer {
-	s.statusMonitor = true
+func (s *tcpServer) EnableMonitor(monitorLog *log4g.Loggers) *tcpServer {
+	s.monitor = true
+	s.monitorLog = monitorLog
 	return s
 }
 
@@ -68,16 +71,7 @@ func (s *tcpServer) Start() *tcpServer {
 	}
 
 	if len(s.dispatchers) == 0 {
-		panic("no dispatcher")
-	}
-
-	if s.statusMonitor {
-		go func() {
-			for {
-				time.Sleep(180 * time.Second)
-				log4g.Info("*[Server Status] goroutine  num: %d, connection num: %d", runtime.NumGoroutine(), s.hub.Count())
-			}
-		}()
+		panic("no Dispatcher")
 	}
 
 	var err error
@@ -100,7 +94,31 @@ func (s *tcpServer) Start() *tcpServer {
 		s.closeListen.Done()
 	}()
 
-	s.started = true
+	s.startTime = time.Now()
+
+	if s.monitor {
+		go func() {
+			ticker := time.NewTicker(time.Duration(NetConfig.MonitorBeat) * time.Second)
+			previousTime := s.startTime
+			for {
+				if closed {
+					ticker.Stop()
+					break
+				}
+				select {
+				case <- ticker.C:
+					trc, twc, prc, pwc := s.hub.PackCount()
+					now := time.Now()
+					duration := now.Sub(previousTime)
+					previousTime = now
+					s.monitorLog.Info("")
+					s.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", s.Name, runtime.NumGoroutine(), s.hub.Count())
+					s.monitorLog.Info("*[%s message] read: %d, write: %d", s.Name, trc, twc)
+					s.monitorLog.Info("*[%s per sec] read: %d, write: %d", s.Name, prc * int64(time.Second) / int64(duration), pwc * int64(time.Second) / int64(duration))
+				}
+			}
+		}()
+	}
 
 	return s
 }
@@ -155,35 +173,38 @@ func (s *tcpServer) listen() {
 }
 
 func (s *tcpServer) Close() {
+
+	s.closed = true
+
 	//close listener
 	s.closeListen.Add(1)
 	s.listener.Close()
 	s.closeListen.Wait()
-	log4g.Info("closed server[%s] listener", s.Addr)
+	log4g.Info("closed server[%s] listener", s.Name)
 
 	//close all connections
 	s.hub.CloseConnections()
 	s.closeConn.Wait()
-	log4g.Info("closed server[%s] connections/readers", s.Addr)
+	log4g.Info("closed server[%s] connections/readers", s.Name)
 
 	//close net manager
 	s.hub.Destroy()
-	log4g.Info("closed server[%s] manager", s.Addr)
+	log4g.Info("closed server[%s] manager", s.Name)
 
 	//close dispatchers
 	for _, d := range s.dispatchers {
 		d.Destroy()
 	}
-	log4g.Info("closed server[%s] dispatcher", s.Addr)
+	log4g.Info("closed server[%s] Dispatcher", s.Name)
 
-	log4g.Info("closed server[%s]", s.Addr)
+	log4g.Info("closed server[%s]", s.Name)
 }
 
 func (s *tcpServer) Wait(others ...Closer) {
 	sig := make(chan os.Signal, 1)
 
 	signal.Notify(sig, os.Interrupt, os.Kill, Terminal)
-	log4g.Info("server[%s] is closing with signal %v", s.Addr, <-sig)
+	log4g.Info("server[%s] is closing with signal %v", s.Name, <-sig)
 
 	for _, other := range others {
 		other.Close()
