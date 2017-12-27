@@ -5,9 +5,10 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"time"
-	"runtime"
+	"github.com/carsonsx/gutil"
 )
 
 const (
@@ -26,21 +27,23 @@ func NewTcpClient(name string, addrFn func() (addrs []*NetAddr, err error)) *TCP
 }
 
 type TCPClient struct {
-	name string
-	addrFn         func() (addrs []*NetAddr, err error)
-	AutoReconnect  bool
-	reconnectDelay int
-	serializer     Serializer
-	dispatchers    []*Dispatcher
-	hub            NetHub
-	heartbeat      bool
-	heartbeatData  []byte
-	sig            chan os.Signal
-	closed         bool
-	firstConnected sync.WaitGroup
-	monitor     bool
-	monitorLog  *log4g.Loggers
-	startTime time.Time
+	name             string
+	addrFn           func() (addrs []*NetAddr, err error)
+	readIntercepter  Intercepter
+	writeIntercepter Intercepter
+	AutoReconnect    bool
+	reconnectDelay   int
+	serializer       Serializer
+	dispatchers      []*Dispatcher
+	hub              NetHub
+	heartbeat        bool
+	heartbeatData    []byte
+	sig              chan os.Signal
+	closed           bool
+	firstConnected   sync.WaitGroup
+	monitor          bool
+	monitorLog       *log4g.Loggers
+	startTime        time.Time
 }
 
 func (c *TCPClient) SetSerializer(serializer Serializer) *TCPClient {
@@ -55,14 +58,26 @@ func (c *TCPClient) AddDispatchers(dispatchers ...*Dispatcher) *TCPClient {
 	return c
 }
 
-func (c *TCPClient) EnableHeartbeat() *TCPClient {
-	c.heartbeat = true
+func (c *TCPClient) SetReadIntercepter(intercepter Intercepter) *TCPClient {
+	c.readIntercepter = intercepter
+	return c
+}
+
+func (c *TCPClient) SetWriteIntercepter(intercepter Intercepter) *TCPClient {
+	c.writeIntercepter = intercepter
+	return c
+}
+func (c *TCPClient) SetHub(hub NetHub) *TCPClient {
+	c.hub = hub
 	return c
 }
 
 func (c *TCPClient) EnableMonitor(monitorLog *log4g.Loggers) *TCPClient {
 	c.monitor = true
 	c.monitorLog = monitorLog
+	if c.monitorLog == nil {
+		c.monitorLog = log4g.NewLoggers()
+	}
 	return c
 }
 
@@ -73,12 +88,13 @@ func (c *TCPClient) DisableAutoReconnect() *TCPClient {
 
 func (c *TCPClient) Connect() *TCPClient {
 
-	// Init the connection manager
-	c.hub = NewNetHub(c.heartbeat, true)
+	if c.hub == nil {
+		c.hub = NewNetHub(false, true)
+	}
+	c.hub.SetSerializer(c.serializer)
 
 	for _, d := range c.dispatchers {
 		d.serializer = c.serializer
-		d.hub = c.hub
 	}
 
 	addrs, err := c.addrFn()
@@ -122,7 +138,8 @@ func (c *TCPClient) Connect() *TCPClient {
 					break
 				}
 				select {
-				case <- ticker.C:
+				case <-ticker.C:
+					c.hub.Statistics()
 					trc, twc, prc, pwc := c.hub.PackCount()
 					now := time.Now()
 					duration := now.Sub(previousTime)
@@ -130,7 +147,11 @@ func (c *TCPClient) Connect() *TCPClient {
 					c.monitorLog.Info("")
 					c.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", c.name, runtime.NumGoroutine(), c.hub.Count())
 					c.monitorLog.Info("*[%s message] read: %d, write: %d", c.name, trc, twc)
-					c.monitorLog.Info("*[%s per sec] read: %d, write: %d", c.name, prc * int64(time.Second) / int64(duration), pwc * int64(time.Second) / int64(duration))
+					c.monitorLog.Info("*[%s msg/sec] read: %d, write: %d", c.name, prc*int64(time.Second)/int64(duration), pwc*int64(time.Second)/int64(duration))
+					trd, twd, ord, owd := c.hub.DataUsage()
+					c.monitorLog.Info("*[%s data usage] read: %s, write: %s", c.name, gutil.HumanReadableByteCount(trd*int64(time.Second)/int64(duration), true), gutil.HumanReadableByteCount(twd*int64(time.Second)/int64(duration), true))
+					//s.monitorLog.Info("*[%s data  offset] read: %s, write: %s", s.Name, gutil.HumanReadableByteCount(ord, true), gutil.HumanReadableByteCount(owd, true))
+					c.monitorLog.Info("*[%s data/sec] read: %s, write: %s", c.name, gutil.HumanReadableByteCount(ord*int64(time.Second)/int64(duration), true), gutil.HumanReadableByteCount(owd*int64(time.Second)/int64(duration), true))
 				}
 			}
 		}()
@@ -160,12 +181,13 @@ func (c *TCPClient) doConnect(addr *NetAddr) {
 			c.hub.Remove(conn)
 			agent := newNetAgent(c.hub, conn, nil, nil, nil, c.serializer)
 			for _, d := range c.dispatchers {
-				d.handleConnectionClosed(agent)
+				d.dispatchConnectionClosedEvent(agent)
 			}
 		}
 
 		if c.closed || !c.AutoReconnect {
 			log4g.Info("disconnected")
+			c.sig <- Terminal
 			break
 		}
 
@@ -188,7 +210,7 @@ func (c *TCPClient) connect(name, addr string) (conn NetConn, err error) {
 	}
 	log4g.Info("connected to %s", netconn.RemoteAddr().String())
 	c.reconnectDelay = reconnect_delay_min
-	conn = newTcpConn(netconn)
+	conn = newTcpConn(netconn, c.readIntercepter, c.writeIntercepter)
 	_conn := c.hub.Get(name)
 	if _conn != nil {
 		failedData := _conn.NotWrittenData()
@@ -202,7 +224,7 @@ func (c *TCPClient) connect(name, addr string) (conn NetConn, err error) {
 	c.hub.Add(name, conn)
 	agent := newNetAgent(c.hub, conn, nil, nil, nil, c.serializer)
 	for _, d := range c.dispatchers {
-		d.handleConnectionCreated(agent)
+		d.dispatchConnectionCreatedEvent(agent)
 	}
 	return
 }
@@ -212,8 +234,8 @@ func (c *TCPClient) Close() {
 	c.closed = true
 
 	//close all connections
-	c.hub.CloseConnections()
-	log4g.Info("closed client[%s] connections", c.name)
+	//c.hub.CloseConnections()
+	//log4g.Info("closed client[%s] connections", c.name)
 
 	//close net hub
 	c.hub.Destroy()

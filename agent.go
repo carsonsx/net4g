@@ -1,7 +1,7 @@
 package net4g
 
 import (
-	"github.com/carsonsx/net4g/util"
+	"github.com/carsonsx/gutil"
 	"net"
 )
 
@@ -14,17 +14,19 @@ type NetSession interface {
 	GetBool(key string, defaultValue ...bool) bool
 	Has(key string) bool
 	Remove(key string)
-	Key() string
+	SetLogin()
+	IsLogin() bool
 }
 
 func NewNetSession() NetSession {
 	s := new(netSession)
-	s.map_data = util.NewSafeMap()
+	s.map_data = gutil.NewSafeMap()
 	return s
 }
 
 type netSession struct {
-	map_data util.Map
+	map_data gutil.Map
+	login    bool
 }
 
 func (s *netSession) Set(key string, value interface{}) {
@@ -89,8 +91,12 @@ func (s *netSession) Remove(key string) {
 	s.map_data.Remove(key)
 }
 
-func (s *netSession) Key() string {
-	return s.GetString(SESSION_CONNECT_KEY)
+func (s *netSession) SetLogin() {
+	s.login = true
+}
+
+func (s *netSession) IsLogin() bool {
+	return s.login
 }
 
 type NetAgent interface {
@@ -99,7 +105,7 @@ type NetAgent interface {
 	Msg() interface{}
 	RemoteAddr() net.Addr
 	Session() NetSession
-	Key(key string)
+	Key(key ...string) string
 	Write(v interface{}, h ...interface{}) error
 	Close()
 	IsClosed() bool
@@ -150,8 +156,13 @@ func (a *netAgent) Session() NetSession {
 	return a.session
 }
 
-func (a *netAgent) Key(key string) {
-	a.hub.Key(a.conn, key)
+func (a *netAgent) Key(key ...string) string {
+	if len(key) > 0 {
+		a.hub.Key(a.conn, key[0])
+		return key[0]
+	} else {
+		return a.session.GetString(SESSION_CONNECT_KEY_USER)
+	}
 }
 
 func (a *netAgent) Write(v interface{}, h ...interface{}) error {

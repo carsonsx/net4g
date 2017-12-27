@@ -1,18 +1,18 @@
 package net4g
 
 import (
+	"github.com/carsonsx/gutil"
 	"github.com/carsonsx/log4g"
-	"github.com/carsonsx/net4g/util"
-	"time"
 	"os"
 	"os/signal"
+	"time"
 )
 
-var _functions = util.NewQueue()
+var funcQueue = gutil.NewQueue()
 
 func TestCall(functions ...func()) {
 	for _, function := range functions {
-		_functions.Offer(function)
+		funcQueue.Offer(function)
 	}
 	TestDone()
 }
@@ -24,8 +24,9 @@ func TestWait(delay ...int) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, os.Kill)
 	select {
-		case <-done:
-		case <- sig:
+	case <-done:
+		log4g.Info("[DONE]")
+	case <-sig:
 	}
 	if len(delay) > 0 && delay[0] > 0 {
 		time.Sleep(time.Duration(delay[0]) * time.Second)
@@ -36,8 +37,8 @@ func TestWait(delay ...int) {
 func TestDone(force ...bool) {
 	if len(force) > 0 && force[0] {
 		done <- true
-	} else if _functions.Len() > 0 {
-		_functions.Poll().(func())()
+	} else if funcQueue.Len() > 0 {
+		funcQueue.Poll().(func())()
 	} else {
 		log4g.Info("all calls done")
 		if !closed {

@@ -1,10 +1,9 @@
 package net4g
 
 import (
-	"encoding/json"
-	"github.com/carsonsx/log4g"
-	"io/ioutil"
 	"time"
+	"fmt"
+	"github.com/carsonsx/gutil"
 )
 
 type ReadMode string
@@ -17,6 +16,10 @@ const (
 var NetConfig netConfig
 
 type netConfig struct {
+	ServerName         string        `json:"server_name"`
+	Address            string        `json:"-"`
+	Host               string        `json:"host"`
+	Port               int           `json:"port"`
 	ReadMode           ReadMode      `json:"read_mode"`
 	MaxLength          uint64        `json:"max_length"`
 	BeginBytes         []byte        `json:"-"`
@@ -33,14 +36,9 @@ type netConfig struct {
 	MonitorBeat        int           `json:"monitor_beat"`
 }
 
-func (c *netConfig) Print() {
-	log4g.Info("Net4g Config:")
-	log4g.Info(log4g.JsonFunc(&NetConfig))
-}
-
-var searchPath = []string{"", "conf/", "config/"}
-
 func init() {
+	NetConfig.ServerName = "GameServer"
+	NetConfig.Port = 6666
 	NetConfig.ReadMode = READ_MODE_BY_LENGTH
 	NetConfig.MaxLength = 1 << 16
 	NetConfig.HeaderSize = 2
@@ -51,39 +49,8 @@ func init() {
 	NetConfig.HeartbeatData = []byte{}
 	NetConfig.NetTolerableTime = 3 // second
 	NetConfig.IdSize = 2
-	NetConfig.MonitorBeat = 10 // second
+	NetConfig.MonitorBeat = 3 // second
 
-	searchJsonConfig("net4g.json", &NetConfig)
-}
-
-func searchJsonConfig(filename string, v interface{}) {
-	found := false
-	for _, prefix := range searchPath {
-		filepath := prefix + filename
-		if loadJsonConfig(filepath, v) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		log4g.Info("not found any net4g config")
-	} else {
-		NetConfig.Print()
-	}
-}
-
-func loadJsonConfig(filename string, v interface{}) bool {
-	log4g.Debug("try to load net4g config file: %s", filename)
-	data, err := ioutil.ReadFile(filename)
-	if err != nil {
-		log4g.Debug(err)
-		return false
-	}
-	err = json.Unmarshal(data, v)
-	if err != nil {
-		log4g.Fatal(err)
-		return false
-	}
-	log4g.Info("loaded net4g config file: %s", filename)
-	return true
+	gutil.LoadJsonFile(&NetConfig, nil, "net4g.json", "conf/net4g.json", "config/net4g.json")
+	NetConfig.Address = fmt.Sprintf("%s:%d", NetConfig.Host, NetConfig.Port)
 }
