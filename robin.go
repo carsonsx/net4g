@@ -1,4 +1,4 @@
-package lb
+package net4g
 
 import (
 	"sync"

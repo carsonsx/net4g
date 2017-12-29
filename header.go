@@ -1,4 +1,4 @@
-package util
+package net4g
 
 import (
 	"encoding/binary"

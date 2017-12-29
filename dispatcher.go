@@ -39,10 +39,10 @@ func NewNamedDispatcher(name string, goroutineNum ...int) *Dispatcher {
 	p := new(Dispatcher)
 	p.Name = name
 
-	p.connCreatedChan = make(chan NetAgent, 100)
-	p.connClosedChan = make(chan NetAgent, 100)
-	p.dispatchChan = make(chan NetAgent, 1000)
-	p.timerEventChan = make(chan *NetTimerEvent, 10000)
+	p.connCreatedChan = make(chan NetAgent, NetConfig.DispatchChanSize)
+	p.connClosedChan = make(chan NetAgent, NetConfig.DispatchChanSize)
+	p.dispatchChan = make(chan NetAgent, NetConfig.DispatchChanSize)
+	p.timerEventChan = make(chan *NetTimerEvent, NetConfig.DispatchChanSize)
 
 	p.destroyChan = make(chan bool, 1)
 	p.msgHandlers = make(map[interface{}]func(agent NetAgent))
@@ -166,6 +166,23 @@ func (p *Dispatcher) listen() {
 			for {
 				select {
 				case <-p.destroyChan:
+				outer2:
+					for {
+						select {
+						case agent := <-p.connClosedChan:
+							p.onConnectionClosedHandlers(agent)
+						case agent := <-p.connCreatedChan:
+							p.onConnectionCreatedHandlers(agent)
+						case te := <-p.timerEventChan:
+							if te.handler != nil {
+								te.handler(te.time, te.params...)
+							}
+						case agent := <-p.dispatchChan:
+							p.dispatch(agent)
+						default:
+							break outer2
+						}
+					}
 					p.onDestroyHandler()
 					break outer
 				case agent := <-p.connClosedChan:
@@ -286,10 +303,10 @@ func (p *Dispatcher) onDestroyHandler() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			log4g.Error("********************* Destroy Handler Panic *********************")
+			log4g.Error("********************* CloseAllConnections Handler Panic *********************")
 			log4g.Error(r)
 			log4g.Error(string(debug.Stack()))
-			log4g.Error("********************* Destroy Handler Panic *********************")
+			log4g.Error("********************* CloseAllConnections Handler Panic *********************")
 		}
 	}()
 
@@ -320,4 +337,5 @@ func (p *Dispatcher) Destroy() {
 	//close(p.dispatchChan)
 	//close(p.sessionClosedChan)
 	//close(p.destroyChan)
+	log4g.Info("closed dispatcher %s", p.Name)
 }

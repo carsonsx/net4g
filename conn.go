@@ -3,12 +3,12 @@ package net4g
 import (
 	"errors"
 	"github.com/carsonsx/log4g"
-	"github.com/carsonsx/net4g/util"
 	"io"
 	"net"
 	"sync"
 	"time"
 	"bytes"
+	"sync/atomic"
 )
 
 type NetWriter interface {
@@ -17,12 +17,14 @@ type NetWriter interface {
 
 type NetConn interface {
 	RemoteAddr() net.Addr
+	LocalAddr() net.Addr
 	Read() (p []byte, err error)
 	Write(p []byte) error
 	Session() NetSession
 	Close()
 	IsClosed() bool
 	NotWrittenData() [][]byte
+	WritingCount() int64
 	PopCount() (read int64, write int64)
 	PopDataUsage() (read int64, write int64)
 }
@@ -32,7 +34,7 @@ func newTcpConn(conn net.Conn, readIntercepter, writeIntercepter Intercepter) *t
 	tcp.conn = conn
 	tcp.readIntercepter = readIntercepter
 	tcp.writeIntercepter = writeIntercepter
-	tcp.writeChan = make(chan []byte, 10000)
+	tcp.writeChan = make(chan []byte, NetConfig.WriteChanSize)
 	tcp.closeChan = make(chan bool)
 	tcp.session = NewNetSession()
 	tcp.session.Set(SESSION_CONNECT_ESTABLISH_TIME, time.Now())
@@ -58,13 +60,18 @@ type tcpNetConn struct {
 	buffer           []byte
 	offset           int
 	readCount        int64
-	writeCount       int64
+	writingCount     int64
+	writtenCount     int64
 	readDataUsage    int64
 	writeDataUsage   int64
 }
 
 func (c *tcpNetConn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
+}
+
+func (c *tcpNetConn) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
 }
 
 func (c *tcpNetConn) Read() (data []byte, err error) {
@@ -80,7 +87,7 @@ func (c *tcpNetConn) Read() (data []byte, err error) {
 			}
 			return
 		}
-		msgLen := util.GetIntHeader(header[NetConfig.LengthIndex:], NetConfig.LengthSize, NetConfig.LittleEndian)
+		msgLen := GetIntHeader(header[NetConfig.LengthIndex:], NetConfig.LengthSize, NetConfig.LittleEndian)
 		data = make([]byte, msgLen)
 		if msgLen > 0 {
 			log4g.Trace("try to read %d data", msgLen)
@@ -186,7 +193,7 @@ func (c *tcpNetConn) startWriting() {
 				}
 				var pack []byte
 				if NetConfig.ReadMode == READ_MODE_BY_LENGTH {
-					pack = util.AddIntHeader(data, NetConfig.LengthSize, uint64(len(data)), NetConfig.LittleEndian)
+					pack = AddIntHeader(data, NetConfig.LengthSize, uint64(len(data)), NetConfig.LittleEndian)
 				} else if NetConfig.ReadMode == READ_MODE_BEGIN_END {
 					newData := append(data, NetConfig.EndBytes...)
 					pack = make([]byte, len(NetConfig.BeginBytes)+len(newData))
@@ -205,7 +212,8 @@ func (c *tcpNetConn) startWriting() {
 					break outer
 				} else {
 					c.session.Set(SESSION_CONNECT_LAST_WRITE_TIME, time.Now())
-					c.writeCount++
+					c.writtenCount++
+					atomic.AddInt64(&c.writingCount, -1)
 					//log4g.Info("written countMsg %d %s", c.writtenCount, c.RemoteAddr())
 					c.writeDataUsage += int64(len(pack))
 				}
@@ -219,13 +227,15 @@ func (c *tcpNetConn) Write(p []byte) error {
 	var err error
 	if c.closed {
 		text := "write to closed network connection"
-		log4g.Error(text)
+		log4g.Info(text)
 		err = errors.New(text)
 		if NetConfig.KeepWriteData {
 			c.writeChan <- p
+			atomic.AddInt64(&c.writingCount, 1)
 		}
 	} else {
 		c.writeChan <- p
+		atomic.AddInt64(&c.writingCount, 1)
 	}
 
 	return err
@@ -271,11 +281,15 @@ func (c *tcpNetConn) Session() NetSession {
 	return c.session
 }
 
+func (c *tcpNetConn) WritingCount() int64 {
+	return c.writingCount
+}
+
 func (c *tcpNetConn) PopCount() (read int64, write int64) {
 	read = c.readCount
 	c.readCount = 0
-	write = c.writeCount
-	c.writeCount = 0
+	write = c.writtenCount
+	c.writtenCount = 0
 	return
 }
 

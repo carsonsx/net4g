@@ -1,4 +1,4 @@
-package lb_test
+package net4g
 
 import (
 	"fmt"

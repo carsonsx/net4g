@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/carsonsx/log4g"
-	"github.com/carsonsx/net4g/util"
 	"github.com/golang/protobuf/proto"
 	"reflect"
 )
@@ -193,7 +192,7 @@ func (s *EmptySerializer) DeserializeId(raw []byte) (id interface{}, t reflect.T
 			log4g.Error(err)
 			return
 		}
-		id = int(util.GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
+		id = int(GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
 		data = raw[NetConfig.IdSize:]
 	} else if _, ok := s.ids[0].(string); ok {
 		var rawMap map[string]json.RawMessage
@@ -247,7 +246,7 @@ func (s *ByteSerializer) Serialize(v, h interface{}) (data []byte, err error) {
 	if rp, ok := v.(*RawPack); ok {
 		s.PreRawPack(rp)
 		log4g.Trace("serialized - %v", rp)
-		data = util.AddIntHeader(rp.Data, NetConfig.IdSize, uint64(rp.IntId()), NetConfig.LittleEndian)
+		data = AddIntHeader(rp.Data, NetConfig.IdSize, uint64(rp.IntId()), NetConfig.LittleEndian)
 	} else {
 		data = v.([]byte)
 	}
@@ -269,7 +268,7 @@ func (s *ByteSerializer) Serialize(v, h interface{}) (data []byte, err error) {
 
 //func (s *ByteSerializer) Deserialize(raw []byte) (v, h interface{}, rp *RawPack, err error) {
 //	rp = new(RawPack)
-//	rp.Id = int(util.GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
+//	rp.Id = int(GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
 //	rp.Data = raw[NetConfig.IdSize:]
 //	v = rp.Data
 //	log4g.Trace("deserialize - %v", *rp)
@@ -321,7 +320,7 @@ func (s *JsonSerializer) Serialize(v, h interface{}) (data []byte, err error) {
 		s.PreRawPack(rp)
 		if id, ok := s.SerializerTypeIdMap[rp.Type]; ok {
 			if intId, ok := id.(int); ok {
-				data = util.AddIntHeader(rp.Data, NetConfig.IdSize, uint64(intId), NetConfig.LittleEndian)
+				data = AddIntHeader(rp.Data, NetConfig.IdSize, uint64(intId), NetConfig.LittleEndian)
 			} else if strId, ok := id.(string); ok {
 				m := map[string]json.RawMessage{strId: rp.Data}
 				data, err = json.Marshal(m)
@@ -350,7 +349,7 @@ func (s *JsonSerializer) Serialize(v, h interface{}) (data []byte, err error) {
 					log4g.Error(err)
 					return
 				}
-				data = util.AddIntHeader(data, NetConfig.IdSize, uint64(intId), NetConfig.LittleEndian)
+				data = AddIntHeader(data, NetConfig.IdSize, uint64(intId), NetConfig.LittleEndian)
 			} else if strId, ok := id.(string); ok {
 				m := map[string]interface{}{strId: v}
 				data, err = json.Marshal(m)
@@ -392,7 +391,7 @@ func (s *JsonSerializer) Serialize(v, h interface{}) (data []byte, err error) {
 //			return
 //		}
 //
-//		rp.Id = int(util.GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
+//		rp.Id = int(GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
 //		rp.Data = raw[NetConfig.IdSize:]
 //
 //		var ok bool
@@ -478,7 +477,7 @@ func (s *ProtobufSerializer) Serialize(v, h interface{}) (data []byte, err error
 
 	if rp, ok := v.(*RawPack); ok {
 		s.PreRawPack(rp)
-		data = util.AddIntHeader(rp.Data, NetConfig.IdSize, uint64(rp.IntId()), NetConfig.LittleEndian)
+		data = AddIntHeader(rp.Data, NetConfig.IdSize, uint64(rp.IntId()), NetConfig.LittleEndian)
 		if log4g.IsDebugEnabled() {
 			bytes, _ := json.Marshal(v)
 			log4g.Trace("serialize %d - %v", rp.Id, string(bytes))
@@ -495,7 +494,7 @@ func (s *ProtobufSerializer) Serialize(v, h interface{}) (data []byte, err error
 				return
 			}
 			log4g.Trace("[%d]write raw msg: %v", len(data), data)
-			data = util.AddIntHeader(data, NetConfig.IdSize, uint64(id.(int)), NetConfig.LittleEndian)
+			data = AddIntHeader(data, NetConfig.IdSize, uint64(id.(int)), NetConfig.LittleEndian)
 			log4g.Trace("[%d]write id msg: %v", len(data), data)
 			if log4g.IsDebugEnabled() {
 				bytes, _ := json.Marshal(v)
@@ -522,7 +521,7 @@ func (s *ProtobufSerializer) Serialize(v, h interface{}) (data []byte, err error
 //	}
 //
 //	rp = new(RawPack)
-//	rp.Id = int(util.GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
+//	rp.Id = int(GetIntHeader(raw, NetConfig.IdSize, NetConfig.LittleEndian))
 //	rp.Data = raw[NetConfig.IdSize:]
 //
 //	var ok bool

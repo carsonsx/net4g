@@ -39,8 +39,6 @@ type TCPServer struct {
 	hub              NetHub
 	listener         net.Listener
 	closeConn        sync.WaitGroup
-	closeListen      sync.WaitGroup
-	closed           bool
 	monitor          bool
 	monitorLog       *log4g.Loggers
 	startTime        time.Time
@@ -108,7 +106,7 @@ func (s *TCPServer) Start() *TCPServer {
 	log4g.Info("TCP server listening on %s", s.listener.Addr().String())
 
 	if s.hub == nil {
-		s.hub = NewNetHub(false, false)
+		s.hub = NewNetHub(HEART_BEAT_MODE_NONE, false)
 	}
 	s.hub.SetSerializer(s.Serializer)
 
@@ -116,10 +114,7 @@ func (s *TCPServer) Start() *TCPServer {
 		d.serializer = s.Serializer
 	}
 
-	go func() {
-		s.listen()
-		s.closeListen.Done()
-	}()
+	go s.listen()
 
 	s.startTime = time.Now()
 
@@ -135,17 +130,18 @@ func (s *TCPServer) Start() *TCPServer {
 				select {
 				case <-ticker.C:
 					s.hub.Statistics()
-					trc, twc, prc, pwc := s.hub.PackCount()
 					now := time.Now()
 					duration := now.Sub(previousTime)
 					previousTime = now
+					totalReadCount, totalWritingCount, totalWrittenCount, popReadCount, popWrittenCount := s.hub.PackCount()
 					s.monitorLog.Info("")
 					s.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", s.Name, runtime.NumGoroutine(), s.hub.Count())
-					s.monitorLog.Info("*[%s message] read: %d, write: %d", s.Name, trc, twc)
-					s.monitorLog.Info("*[%s msg/sec] read: %d, write: %d", s.Name, prc*int64(time.Second)/int64(duration), pwc*int64(time.Second)/int64(duration))
+					s.monitorLog.Info("*[%s message] waiting write: %d", s.Name, totalWritingCount)
+					s.monitorLog.Info("*[%s message] read: %d, written: %d", s.Name, totalReadCount, totalWrittenCount)
+					s.monitorLog.Info("*[%s msg/sec] read: %d, written: %d", s.Name, gutil.ToPerSecond(popReadCount, duration), gutil.ToPerSecond(popWrittenCount, duration))
 					trd, twd, ord, owd := s.hub.DataUsage()
-					s.monitorLog.Info("*[%s data usage] read: %s, write: %s", s.Name, gutil.HumanReadableByteCount(trd*int64(time.Second)/int64(duration), true), gutil.HumanReadableByteCount(twd*int64(time.Second)/int64(duration), true))
-					s.monitorLog.Info("*[%s data/sec] read: %s, write: %s", s.Name, gutil.HumanReadableByteCount(ord*int64(time.Second)/int64(duration), true), gutil.HumanReadableByteCount(owd*int64(time.Second)/int64(duration), true))
+					s.monitorLog.Info("*[%s data usage] read: %s, written: %s", s.Name, gutil.HumanReadableByteCount(gutil.ToPerSecond(trd, duration), true), gutil.HumanReadableByteCount(gutil.ToPerSecond(twd, duration), true))
+					s.monitorLog.Info("*[%s data/sec] read: %s, written: %s", s.Name, gutil.HumanReadableByteCount(gutil.ToPerSecond(ord, duration), true), gutil.HumanReadableByteCount(gutil.ToPerSecond(owd, duration), true))
 				}
 			}
 		}()
@@ -186,7 +182,6 @@ func (s *TCPServer) listen() {
 			defer s.closeConn.Done()
 			newNetReader(conn, s.Serializer, s.dispatchers, s.hub).Read(func(data []byte) bool {
 				if IsHeartbeatData(data) {
-					log4g.Trace("heartbeat from client")
 					s.hub.Heartbeat(conn)
 					conn.Write(data) //write back heartbeat
 					return false
@@ -198,35 +193,27 @@ func (s *TCPServer) listen() {
 			for _, d := range s.dispatchers {
 				d.dispatchConnectionClosedEvent(agent)
 			}
-			log4g.Info("disconnected from %s", conn.RemoteAddr().String())
+			log4g.Info("disconnected connection: %s <- %s", conn.LocalAddr(), conn.RemoteAddr().String())
 		}()
 	}
 }
 
 func (s *TCPServer) Close() {
 
-	s.closed = true
-
-	//close listener
-	s.closeListen.Add(1)
+	// close listener
 	s.listener.Close()
-	s.closeListen.Wait()
-	log4g.Info("closed server[%s] listener", s.Name)
+	log4g.Info("closed server %s listener", s.Name)
 
 	//close all connections
-	//s.hub.CloseConnections()
-	//s.closeConn.Wait()
-	//log4g.Info("closed server[%s] connections/readers", s.Name)
+	s.hub.CloseAllConnections()
 
-	//close net manager
-	s.hub.Destroy()
-	log4g.Info("closed server[%s] manager", s.Name)
+	//wait all connection closed
+	s.closeConn.Wait()
 
 	//close dispatchers
 	for _, d := range s.dispatchers {
 		d.Destroy()
 	}
-	log4g.Info("closed server[%s] Dispatcher", s.Name)
 
 	log4g.Info("closed server[%s]", s.Name)
 }
