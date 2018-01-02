@@ -5,8 +5,13 @@ import (
 	"time"
 )
 
+type LoadBalance interface {
+	Select() string
+	Remove(seed string)
+}
+
 type RoundRobinLoadBalance struct {
-	selects  []string
+	seeds    []string
 	size     int
 	round    int
 	seedFunc func() ([]string, error)
@@ -22,21 +27,21 @@ func (lb *RoundRobinLoadBalance) Select() string {
 	if lb.round >= lb.size {
 		lb.round = 0
 	}
-	client := lb.selects[lb.round]
+	client := lb.seeds[lb.round]
 	lb.round++
 	return client
 }
 
-func (lb *RoundRobinLoadBalance) Remove(sel string) {
+func (lb *RoundRobinLoadBalance) Remove(seed string) {
 	lb.Lock()
 	defer lb.Unlock()
-	for i, v := range lb.selects {
-		if v == sel {
-			lb.selects = append(lb.selects[:i], lb.selects[i+1:]...)
+	for i, v := range lb.seeds {
+		if v == seed {
+			lb.seeds = append(lb.seeds[:i], lb.seeds[i+1:]...)
 			break
 		}
 	}
-	lb.size = len(lb.selects)
+	lb.size = len(lb.seeds)
 }
 
 func (lb *RoundRobinLoadBalance) Start(seedFunc func() ([]string, error), duration time.Duration) {
@@ -58,7 +63,7 @@ func (lb *RoundRobinLoadBalance) refresh() {
 	defer lb.Unlock()
 	selects, err := lb.seedFunc()
 	if err == nil {
-		lb.selects = selects
-		lb.size = len(lb.selects)
+		lb.seeds = selects
+		lb.size = len(lb.seeds)
 	}
 }

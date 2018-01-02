@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 	"fmt"
-	"github.com/orcaman/concurrent-map"
 )
 
 type HeartbeatMode int
@@ -19,7 +18,6 @@ const (
 
 func NewNetHub(heartbeatMode HeartbeatMode, lb bool) *netHub {
 	hub := new(netHub)
-	hub.connections.m = cmap.New()
 	hub.heartbeat(heartbeatMode)
 	hub.enableLB = lb
 	return hub
@@ -50,33 +48,6 @@ type NetHub interface {
 	PackCount() (totalRead int64, totalWriting int64, totalWritten int64, popRead int64, popWritten int64)
 	DataUsage() (totalRead int64, totalWritten int64, popRead int64, popWritten int64)
 	CloseAllConnections()
-}
-
-type netConnMap struct {
-	m cmap.ConcurrentMap
-}
-
-func (m *netConnMap) Get(key string) NetConn {
-	if v, ok := m.m.Get(key); ok {
-		return v.(NetConn)
-	}
-	return nil
-}
-
-func (m *netConnMap) Range(f func(key string, conn NetConn) bool) {
-	ch := m.m.IterBuffered()
-	for t := range ch {
-		if !f(t.Key, t.Val.(NetConn)) {
-			break
-		}
-	}
-}
-
-func (m *netConnMap) RangeAll(f func(key string, conn NetConn)) {
-	ch := m.m.IterBuffered()
-	for t := range ch {
-		f(t.Key, t.Val.(NetConn))
-	}
 }
 
 type GroupConns struct {
@@ -178,7 +149,7 @@ func (s *connSlice) Remove(conn NetConn) bool {
 }
 
 type netHub struct {
-	connections           netConnMap
+	connections           Map
 	groupConns            GroupConns
 	enableLB              bool
 	lbConnections         connSlice
@@ -198,7 +169,7 @@ type netHub struct {
 func (hub *netHub) Add(key string, conn NetConn) {
 	hub.Heartbeat(conn)
 	conn.Session().Set(SESSION_CONNECT_KEY, key)
-	hub.connections.m.Set(key, conn)
+	hub.connections.Store(key, conn)
 	if hub.enableLB {
 		hub.lbConnections.Append(conn)
 	}
@@ -207,11 +178,11 @@ func (hub *netHub) Add(key string, conn NetConn) {
 
 func (hub *netHub) Key(conn NetConn, key string) {
 	if conn.Session().Get(SESSION_CONNECT_KEY) != key {
-		if c := hub.connections.Get(key); c != nil {
+		if c := hub.Get(key); c != nil {
 			log4g.Panic("connection name '%s' existed", key)
 		}
-		hub.connections.m.Remove(conn.Session().GetString(SESSION_CONNECT_KEY))
-		hub.connections.m.Set(key, conn)
+		hub.connections.Delete(conn.Session().GetString(SESSION_CONNECT_KEY))
+		hub.connections.Store(key, conn)
 		conn.Session().Set(SESSION_CONNECT_KEY, key)
 		conn.Session().Set(SESSION_CONNECT_KEY_USER, key)
 		log4g.Debug("set connection key with %s", key)
@@ -219,15 +190,18 @@ func (hub *netHub) Key(conn NetConn, key string) {
 }
 
 func (hub *netHub) Get(key string) NetConn {
-	return hub.connections.Get(key)
+	if v, ok := hub.connections.Load(key); ok {
+		return v.(NetConn)
+	}
+	return nil
 }
 
 func (hub *netHub) Remove(conn NetConn) bool {
-	c := hub.connections.Get(conn.Session().GetString(SESSION_CONNECT_KEY))
+	c := hub.Get(conn.Session().GetString(SESSION_CONNECT_KEY))
 	if c == nil {
 		return false
 	}
-		hub.connections.m.Remove(conn.Session().GetString(SESSION_CONNECT_KEY))
+	hub.connections.Delete(conn.Session().GetString(SESSION_CONNECT_KEY))
 	if hub.enableLB {
 		hub.lbConnections.Remove(conn)
 	}
@@ -239,23 +213,25 @@ func (hub *netHub) Remove(conn NetConn) bool {
 		}
 	}
 	log4g.Info("removed connection: %s", conn.Session().Get(SESSION_CONNECT_KEY))
-	log4g.Info("connection count: %d", hub.connections.m.Count())
+	log4g.Info("connection count: %d", hub.Count())
 	return true
 
 }
 
 func (hub *netHub) Slice() []NetConn {
 	var conns []NetConn
-	hub.connections.RangeAll(func(key string, conn NetConn) {
-		conns = append(conns, conn)
+	hub.connections.Range(func(key, value interface{}) bool {
+		if value != nil {
+			conns = append(conns, value.(NetConn))
+		}
+		return true
 	})
 	return conns
 }
 
 func (hub *netHub) Count() int {
-	return hub.connections.m.Count()
+	return hub.connections.Len()
 }
-
 
 func (hub *netHub) heartbeat(mode HeartbeatMode) {
 
@@ -293,19 +269,23 @@ func (hub *netHub) heartbeat(mode HeartbeatMode) {
 		for {
 			select {
 			case t := <-heartbeatTicker.C:
-				hub.connections.RangeAll(func(key string, conn NetConn) {
-					now := t.UnixNano()
-					beattime := conn.Session().GetInt64(HEART_BEAT_TIME)
-					timeout := beattime+heartbeatTimeout.Nanoseconds()
-					if now > timeout{
-						log4g.Warn("connection timeout: %s", conn.RemoteAddr().String())
-						log4g.Debug("now=%v,beattime=%v,timeout=%v", t, time.Unix(beattime/int64(time.Second), beattime%int64(time.Second)), time.Unix(timeout/int64(time.Second), timeout%int64(time.Second)))
-						hub.Remove(conn)
-						conn.Close()
-					} else if mode == HEART_BEAT_MODE_ACTIVE {
-						log4g.Debug("local %s heart beat to remote %s", conn.LocalAddr(), conn.RemoteAddr())
-						conn.Write(NetConfig.HeartbeatData)
+				hub.connections.Range(func(key, value interface{}) bool {
+					if value != nil {
+						conn := value.(NetConn)
+						now := t.UnixNano()
+						beattime := conn.Session().GetInt64(HEART_BEAT_TIME)
+						timeout := beattime + heartbeatTimeout.Nanoseconds()
+						if now > timeout {
+							log4g.Warn("connection timeout: %s", conn.RemoteAddr().String())
+							log4g.Debug("now=%v,beattime=%v,timeout=%v", t, time.Unix(beattime/int64(time.Second), beattime%int64(time.Second)), time.Unix(timeout/int64(time.Second), timeout%int64(time.Second)))
+							hub.Remove(conn)
+							conn.Close()
+						} else if mode == HEART_BEAT_MODE_ACTIVE {
+							log4g.Debug("local %s heart beat to remote %s", conn.LocalAddr(), conn.RemoteAddr())
+							conn.Write(NetConfig.HeartbeatData)
+						}
 					}
+					return true
 				})
 			}
 		}
@@ -318,10 +298,10 @@ func (hub *netHub) Heartbeat(conn NetConn) {
 }
 
 func (hub *netHub) Kick(key string) bool {
-	if conn := hub.connections.Get(key); conn != nil {
-		hub.connections.m.Remove(key)
+	if conn := hub.Get(key); conn != nil {
+		hub.Remove(conn)
 		log4g.Warn("kicked connection %s", conn.RemoteAddr().String())
-		log4g.Info("connection count: %d", hub.connections.m.Count())
+		log4g.Info("connection count: %d", hub.Count())
 		return true
 	}
 	return false
@@ -336,7 +316,7 @@ func (hub *netHub) Broadcast(v interface{}, filter func(session NetSession) bool
 }
 
 func (hub *netHub) broadcast(v interface{}, filter func(session NetSession) bool, once bool, h ...interface{}) error {
-	if hub.connections.m.Count() <= 0 {
+	if hub.Count() <= 0 {
 		return nil
 	}
 	data, err := Serialize(hub.serializer, v, h...)
@@ -344,14 +324,17 @@ func (hub *netHub) broadcast(v interface{}, filter func(session NetSession) bool
 		log4g.Error(err)
 		return err
 	}
-	hub.connections.Range(func(key string, conn NetConn) bool {
-		if filter == nil || filter(conn.Session()) {
-			conn.Write(data)
-			if log4g.IsDebugEnabled() {
-				//log4g.Debug("[broadcast] sent to %s", conn.Session().Get(SESSION_ID))
-			}
-			if once {
-				return false
+	hub.connections.Range(func(key, value interface{}) bool {
+		if value != nil {
+			conn := value.(NetConn)
+			if filter == nil || filter(conn.Session()) {
+				conn.Write(data)
+				if log4g.IsDebugEnabled() {
+					//log4g.Debug("[broadcast] sent to %s", conn.Session().Get(SESSION_ID))
+				}
+				if once {
+					return false
+				}
 			}
 		}
 		return true
@@ -378,12 +361,16 @@ func (hub *netHub) BroadcastOne(v interface{}, h ...interface{}) error {
 }
 
 func (hub *netHub) Send(key string, v interface{}) error {
-	data, err := Serialize(hub.serializer, v)
-	if err != nil {
-		return err
-	}
-	if conn := hub.connections.Get(key); conn != nil {
+	var err error
+	if conn := hub.Get(key); conn != nil {
+		data, err := Serialize(hub.serializer, v)
+		if err != nil {
+			return err
+		}
 		err = conn.Write(data)
+		if err == nil {
+			log4g.Debug("sent to %s", key)
+		}
 	} else {
 		err = errors.New(fmt.Sprintf("connection %s not found", key))
 		log4g.Warn(err)
@@ -392,14 +379,18 @@ func (hub *netHub) Send(key string, v interface{}) error {
 }
 
 func (hub *netHub) MultiSend(keys []string, v interface{}) error {
-	data, err := Serialize(hub.serializer, v)
-	if err != nil {
-		return err
-	}
+	var data []byte
+	var err error
 	for _, key := range keys {
-		if conn := hub.connections.Get(key); conn != nil {
+		if conn := hub.Get(key); conn != nil {
+			if data == nil {
+				data, err = Serialize(hub.serializer, v)
+				if err != nil {
+					return err
+				}
+			}
 			if err = conn.Write(data); err != nil {
-				return err
+				log4g.Warn(err)
 			}
 		}
 	}
@@ -465,18 +456,22 @@ func (hub *netHub) RangeSession(f func(session NetSession)) {
 
 func (hub *netHub) Statistics() {
 	hub.totalWritingCount = 0
-	hub.connections.RangeAll(func(key string, conn NetConn) {
-		rc, wc := conn.PopCount()
-		hub.totalReadCount += rc
-		hub.totalWrittenCount += wc
-		hub.popReadCount += rc
-		hub.popWrittenCount += wc
-		rdu, wdu := conn.PopDataUsage()
-		hub.totalReadDataUsage += rdu
-		hub.totalWrittenDataUsage += wdu
-		hub.popReadDataUsage += rdu
-		hub.popWriteDataUsage += wdu
-		hub.totalWritingCount += conn.WritingCount()
+	hub.connections.Range(func(key, value interface{}) bool {
+		if value != nil {
+			conn := value.(NetConn)
+			rc, wc := conn.PopCount()
+			hub.totalReadCount += rc
+			hub.totalWrittenCount += wc
+			hub.popReadCount += rc
+			hub.popWrittenCount += wc
+			rdu, wdu := conn.PopDataUsage()
+			hub.totalReadDataUsage += rdu
+			hub.totalWrittenDataUsage += wdu
+			hub.popReadDataUsage += rdu
+			hub.popWriteDataUsage += wdu
+			hub.totalWritingCount += conn.WritingCount()
+		}
+		return true
 	})
 }
 
@@ -502,10 +497,13 @@ func (hub *netHub) DataUsage() (totalRead int64, totalWritten int64, popRead int
 }
 
 func (hub *netHub) CloseAllConnections() {
-	count := 0
-	hub.connections.RangeAll(func(key string, conn NetConn) {
-		conn.Close()
-		count++
+	log4g.Info("closing all %d connections", hub.Count())
+	hub.connections.Range(func(key, value interface{}) bool {
+		if value != nil {
+			value.(NetConn).Close()
+		}
+		return true
 	})
-	log4g.Info("closed all %d connections", count)
+	hub.connections.Clear()
+	log4g.Info("connection count: %d", hub.Count())
 }

@@ -158,12 +158,13 @@ func (c *TCPClient) doConnect(addr string) {
 	var connected bool
 
 	for {
-		if conn, err := c.connect(addr); err == nil {
+		conn, err := c.connect(addr)
+		if err == nil {
 			if !connected {
 				c.firstConnected.Done()
 				connected = true
 			}
-			newNetReader(conn, c.serializer, c.dispatchers, c.hub).Read(func(data []byte) bool {
+			newNetReader(conn, c.serializer, nil, c.dispatchers, c.hub).Read(func(data []byte) bool {
 				if IsHeartbeatData(data) {
 					c.hub.Heartbeat(conn)
 					return false
@@ -175,11 +176,15 @@ func (c *TCPClient) doConnect(addr string) {
 			for _, d := range c.dispatchers {
 				d.dispatchConnectionClosedEvent(agent)
 			}
+		} else {
+			log4g.Error(err)
 		}
 
 		if c.closed || !c.AutoReconnect {
 			log4g.Info("disconnected")
+			log4g.Error(err)
 			c.sig <- Terminal
+			c.firstConnected.Done()
 			break
 		}
 

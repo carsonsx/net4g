@@ -8,12 +8,7 @@ import (
 	"sync"
 	"time"
 	"bytes"
-	"sync/atomic"
 )
-
-type NetWriter interface {
-	Write(p []byte)
-}
 
 type NetConn interface {
 	RemoteAddr() net.Addr
@@ -49,7 +44,6 @@ type tcpNetConn struct {
 	conn             net.Conn
 	session          NetSession
 	writeChan        chan []byte
-	readChan         chan []byte
 	readIntercepter  Intercepter
 	writeIntercepter Intercepter
 	closeChan        chan bool
@@ -213,7 +207,7 @@ func (c *tcpNetConn) startWriting() {
 				} else {
 					c.session.Set(SESSION_CONNECT_LAST_WRITE_TIME, time.Now())
 					c.writtenCount++
-					atomic.AddInt64(&c.writingCount, -1)
+					//atomic.AddInt64(&c.writingCount, -1)
 					//log4g.Info("written countMsg %d %s", c.writtenCount, c.RemoteAddr())
 					c.writeDataUsage += int64(len(pack))
 				}
@@ -231,11 +225,11 @@ func (c *tcpNetConn) Write(p []byte) error {
 		err = errors.New(text)
 		if NetConfig.KeepWriteData {
 			c.writeChan <- p
-			atomic.AddInt64(&c.writingCount, 1)
+			//atomic.AddInt64(&c.writingCount, 1)
 		}
 	} else {
 		c.writeChan <- p
-		atomic.AddInt64(&c.writingCount, 1)
+		//atomic.AddInt64(&c.writingCount, 1)
 	}
 
 	return err

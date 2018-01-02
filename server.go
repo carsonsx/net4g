@@ -33,6 +33,7 @@ type TCPServer struct {
 	readIntercepter  Intercepter
 	writeIntercepter Intercepter
 	Serializer       Serializer
+	forwarder        Forwarder
 	Dispatcher       *Dispatcher
 	dispatchers      []*Dispatcher
 	mutex            sync.Mutex
@@ -49,8 +50,8 @@ func (s *TCPServer) SetSerializer(serializer Serializer) *TCPServer {
 	return s
 }
 
-func (s *TCPServer) NewJsonSerializer() *TCPServer {
-	s.Serializer = NewJsonSerializer()
+func (s *TCPServer) SetForwarder(forwarder Forwarder) *TCPServer {
+	s.forwarder = forwarder
 	return s
 }
 
@@ -161,7 +162,7 @@ func (s *TCPServer) listen() {
 		}
 		netconn, err := s.listener.Accept()
 		if err != nil {
-			log4g.Error(err)
+			log4g.Warn(err)
 			if neterr, ok := err.(net.Error); ok && neterr.Temporary() {
 				delay = gutil.SmartSleep(delay, maxDelay)
 				continue
@@ -180,7 +181,7 @@ func (s *TCPServer) listen() {
 		go func() { // one connection, one goroutine to read
 			s.closeConn.Add(1)
 			defer s.closeConn.Done()
-			newNetReader(conn, s.Serializer, s.dispatchers, s.hub).Read(func(data []byte) bool {
+			newNetReader(conn, s.Serializer, s.forwarder, s.dispatchers, s.hub).Read(func(data []byte) bool {
 				if IsHeartbeatData(data) {
 					s.hub.Heartbeat(conn)
 					conn.Write(data) //write back heartbeat

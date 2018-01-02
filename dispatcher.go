@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
+	"runtime"
 )
 
 func Dispatch(dispatchers []*Dispatcher, agent NetAgent) {
@@ -52,8 +53,8 @@ func NewNamedDispatcher(name string, goroutineNum ...int) *Dispatcher {
 	} else {
 		p.goroutineNum = 1
 	}
+	log4g.Info("new dispatcher[%s] with %d goroutines", name, p.goroutineNum)
 	p.listen()
-	log4g.Info("new %d %s dispatcher", p.goroutineNum, name)
 	return p
 }
 
@@ -87,10 +88,10 @@ func (p *Dispatcher) AddHandler(h func(agent NetAgent), idOrType ...interface{})
 			id = reflect.TypeOf(id)
 		}
 		p.msgHandlers[id] = h
-		log4g.Info("dispatcher[%s] added a handler for id[%v]", p.Name, id)
+		log4g.Info("add a handler[%s] for id[%v] in dispatcher[%s]", runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name(), id, p.Name)
 	} else {
 		p.globalMsgHandlers = append(p.globalMsgHandlers, h)
-		log4g.Info("dispatcher[%s] added global handler", p.Name)
+		log4g.Info("add a global handler[%s] in dispatcher[%s]", runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name(), p.Name)
 	}
 }
 
@@ -101,10 +102,10 @@ func (p *Dispatcher) AddRawHandler(h func(agent NetAgent), idOrType ...interface
 			id = reflect.TypeOf(id)
 		}
 		p.rawHandlers[id] = h
-		log4g.Info("dispatcher[%s] added a raw handler for id[%v]", p.Name, id)
+		log4g.Info("add a raw handler[%s] for id[%v] in dispatcher[%s]", runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name(), id, p.Name)
 	} else {
 		p.globalRawHandlers = append(p.globalMsgHandlers, h)
-		log4g.Info("dispatcher[%s] added global raw handler", p.Name)
+		log4g.Info("add global raw handler[%s] in dispatcher[%s]", runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name(), p.Name)
 	}
 }
 

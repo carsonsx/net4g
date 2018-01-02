@@ -15,10 +15,11 @@ type NetReader interface {
 	Read(after func(data []byte) bool)
 }
 
-func newNetReader(conn NetConn, serializer Serializer, dispatchers []*Dispatcher, hub NetHub) NetReader {
+func newNetReader(conn NetConn, serializer Serializer, forwarder Forwarder, dispatchers []*Dispatcher, hub NetHub) NetReader {
 	reader := new(netReader)
 	reader.conn = conn
 	reader.serializer = serializer
+	reader.forwarder = forwarder
 	reader.dispatchers = dispatchers
 	reader.hub = hub
 	return reader
@@ -27,6 +28,7 @@ func newNetReader(conn NetConn, serializer Serializer, dispatchers []*Dispatcher
 type netReader struct {
 	conn        NetConn
 	serializer  Serializer
+	forwarder  Forwarder
 	dispatchers []*Dispatcher
 	hub         NetHub
 }
@@ -66,6 +68,12 @@ func (r *netReader) process(raw []byte, prehandler func(data []byte) bool) {
 	rp.Id, rp.Type, rp.Data, err = r.serializer.DeserializeId(raw)
 	if err != nil {
 		return
+	}
+
+	if r.forwarder != nil {
+		if !r.forwarder.Handle(rp.Type, newNetAgent(r.hub, r.conn, rp, nil, nil, r.serializer)) {
+			return
+		}
 	}
 
 	var h interface{}
