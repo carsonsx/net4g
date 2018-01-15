@@ -50,7 +50,7 @@ type TCPClient struct {
 	closed           bool
 	firstConnected   sync.WaitGroup
 	monitor          bool
-	monitorLog       *log4g.Loggers
+	monitorLog       *log4g.Logger
 	startTime        time.Time
 }
 
@@ -80,11 +80,11 @@ func (c *TCPClient) SetHub(hub NetHub) *TCPClient {
 	return c
 }
 
-func (c *TCPClient) EnableMonitor(monitorLog *log4g.Loggers) *TCPClient {
+func (c *TCPClient) EnableMonitor(monitorLog *log4g.Logger) *TCPClient {
 	c.monitor = true
 	c.monitorLog = monitorLog
 	if c.monitorLog == nil {
-		c.monitorLog = log4g.NewLoggers()
+		c.monitorLog = log4g.NewLogger()
 	}
 	return c
 }
@@ -133,13 +133,12 @@ func (c *TCPClient) Connect() *TCPClient {
 				select {
 				case <-ticker.C:
 					c.hub.Statistics()
-					trc, twc0, twc, prc, pwc := c.hub.PackCount()
+					trc, twc, prc, pwc := c.hub.PackCount()
 					now := time.Now()
 					duration := now.Sub(previousTime)
 					previousTime = now
 					c.monitorLog.Info("")
 					c.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", c.name, runtime.NumGoroutine(), c.hub.Count())
-					c.monitorLog.Info("*[%s message] waiting write: %d", c.name, twc0)
 					c.monitorLog.Info("*[%s message] read: %d, write: %d", c.name, trc, twc)
 					c.monitorLog.Info("*[%s msg/sec] read: %d, write: %d", c.name, gutil.ToPerSecond(prc, duration), gutil.ToPerSecond(pwc, duration))
 					trd, twd, ord, owd := c.hub.DataUsage()
@@ -184,7 +183,9 @@ func (c *TCPClient) doConnect(addr string) {
 			log4g.Info("disconnected")
 			log4g.Error(err)
 			c.sig <- Terminal
-			c.firstConnected.Done()
+			if !connected {
+				c.firstConnected.Done()
+			}
 			break
 		}
 
@@ -251,4 +252,5 @@ func (c *TCPClient) Wait() {
 	signal.Notify(c.sig, os.Interrupt, os.Kill, Terminal)
 	log4g.Info("client[%s] is closing with signal %v\n", c.name, <-c.sig)
 	c.Close()
+	log4g.Flush()
 }

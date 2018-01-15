@@ -71,6 +71,7 @@ type Dispatcher struct {
 	connCreatedChan           chan NetAgent
 	connClosedChan            chan NetAgent
 	dispatchChan              chan NetAgent
+	timerMain                 *time.Timer
 	timerEventChan            chan *NetTimerEvent
 	destroyChan               chan bool
 	connectionCreatedHandlers []func(agent NetAgent)
@@ -111,7 +112,7 @@ func (p *Dispatcher) AddRawHandler(h func(agent NetAgent), idOrType ...interface
 
 func (p *Dispatcher) NeedDeserialize(t reflect.Type) bool {
 	if t == nil {
-		log4g.Warn("nil deserialize type")
+		log4g.Error("nil deserialize type")
 		return true
 	}
 	var need bool
@@ -149,6 +150,7 @@ func (p *Dispatcher) OnDestroy(h func()) {
 }
 
 func (p *Dispatcher) listen() {
+
 	//log4g.Debug("Dispatcher goroutine number: %d", p.goroutineNum)
 	p.wg.Add(p.goroutineNum)
 	counter := 1
@@ -304,10 +306,10 @@ func (p *Dispatcher) onDestroyHandler() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			log4g.Error("********************* CloseAllConnections Handler Panic *********************")
+			log4g.Error("********************* Destroy Handler Panic *********************")
 			log4g.Error(r)
 			log4g.Error(string(debug.Stack()))
-			log4g.Error("********************* CloseAllConnections Handler Panic *********************")
+			log4g.Error("********************* Destroy Handler Panic *********************")
 		}
 	}()
 
@@ -334,9 +336,5 @@ func (p *Dispatcher) Destroy() {
 	}
 	p.running = false
 	p.wg.Wait()
-	//how to close gracefully
-	//close(p.dispatchChan)
-	//close(p.sessionClosedChan)
-	//close(p.destroyChan)
 	log4g.Info("closed dispatcher %s", p.Name)
 }

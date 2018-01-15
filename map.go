@@ -145,6 +145,7 @@ func (m *Map) Store(key, value interface{}) {
 			// The entry was previously expunged, which implies that there is a
 			// non-nil dirty map and this entry is not in it.
 			m.dirty[key] = e
+			atomic.AddInt32(&m.length, 1)
 		}
 		e.storeLocked(&value)
 	} else if e, ok := m.dirty[key]; ok {
@@ -283,8 +284,9 @@ func (m *Map) Delete(key interface{}) {
 		m.mu.Unlock()
 	}
 	if ok {
-		e.delete()
-		atomic.AddInt32(&m.length, -1)
+		if e.delete() {
+			atomic.AddInt32(&m.length, -1)
+		}
 	}
 }
 

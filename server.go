@@ -41,7 +41,7 @@ type TCPServer struct {
 	listener         net.Listener
 	closeConn        sync.WaitGroup
 	monitor          bool
-	monitorLog       *log4g.Loggers
+	monitorLog       *log4g.Logger
 	startTime        time.Time
 }
 
@@ -82,7 +82,7 @@ func (s *TCPServer) SetWriteIntercepter(intercepter Intercepter) *TCPServer {
 	return s
 }
 
-func (s *TCPServer) EnableMonitor(monitorLog *log4g.Loggers) *TCPServer {
+func (s *TCPServer) EnableMonitor(monitorLog *log4g.Logger) *TCPServer {
 	s.monitor = true
 	s.monitorLog = monitorLog
 	return s
@@ -130,19 +130,20 @@ func (s *TCPServer) Start() *TCPServer {
 				}
 				select {
 				case <-ticker.C:
-					s.hub.Statistics()
-					now := time.Now()
-					duration := now.Sub(previousTime)
-					previousTime = now
-					totalReadCount, totalWritingCount, totalWrittenCount, popReadCount, popWrittenCount := s.hub.PackCount()
-					s.monitorLog.Info("")
-					s.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", s.Name, runtime.NumGoroutine(), s.hub.Count())
-					s.monitorLog.Info("*[%s message] waiting write: %d", s.Name, totalWritingCount)
-					s.monitorLog.Info("*[%s message] read: %d, written: %d", s.Name, totalReadCount, totalWrittenCount)
-					s.monitorLog.Info("*[%s msg/sec] read: %d, written: %d", s.Name, gutil.ToPerSecond(popReadCount, duration), gutil.ToPerSecond(popWrittenCount, duration))
-					trd, twd, ord, owd := s.hub.DataUsage()
-					s.monitorLog.Info("*[%s data usage] read: %s, written: %s", s.Name, gutil.HumanReadableByteCount(gutil.ToPerSecond(trd, duration), true), gutil.HumanReadableByteCount(gutil.ToPerSecond(twd, duration), true))
-					s.monitorLog.Info("*[%s data/sec] read: %s, written: %s", s.Name, gutil.HumanReadableByteCount(gutil.ToPerSecond(ord, duration), true), gutil.HumanReadableByteCount(gutil.ToPerSecond(owd, duration), true))
+					if count := s.hub.Count(); count > 0 {
+						s.hub.Statistics()
+						now := time.Now()
+						duration := now.Sub(previousTime)
+						previousTime = now
+						totalReadCount, totalWrittenCount, popReadCount, popWrittenCount := s.hub.PackCount()
+						s.monitorLog.Info("")
+						s.monitorLog.Info("*[%s status] goroutine: %d, connection: %d", s.Name, runtime.NumGoroutine(), s.hub.Count())
+						s.monitorLog.Info("*[%s message] read: %d, written: %d", s.Name, totalReadCount, totalWrittenCount)
+						s.monitorLog.Info("*[%s msg/sec] read: %d, written: %d", s.Name, gutil.ToPerSecond(popReadCount, duration), gutil.ToPerSecond(popWrittenCount, duration))
+						trd, twd, ord, owd := s.hub.DataUsage()
+						s.monitorLog.Info("*[%s data usage] read: %s, written: %s", s.Name, gutil.HumanReadableByteCount(gutil.ToPerSecond(trd, duration), true), gutil.HumanReadableByteCount(gutil.ToPerSecond(twd, duration), true))
+						s.monitorLog.Info("*[%s data/sec] read: %s, written: %s", s.Name, gutil.HumanReadableByteCount(gutil.ToPerSecond(ord, duration), true), gutil.HumanReadableByteCount(gutil.ToPerSecond(owd, duration), true))
+					}
 				}
 			}
 		}()
@@ -162,7 +163,7 @@ func (s *TCPServer) listen() {
 		}
 		netconn, err := s.listener.Accept()
 		if err != nil {
-			log4g.Warn(err)
+			log4g.ErrorStack(err)
 			if neterr, ok := err.(net.Error); ok && neterr.Temporary() {
 				delay = gutil.SmartSleep(delay, maxDelay)
 				continue
@@ -230,4 +231,5 @@ func (s *TCPServer) Wait(others ...Closer) {
 	}
 	s.Close()
 	close(sig)
+	log4g.Flush()
 }

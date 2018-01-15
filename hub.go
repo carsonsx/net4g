@@ -45,7 +45,7 @@ type NetHub interface {
 	RangeConn(f func(NetConn))
 	RangeSession(f func(session NetSession))
 	Statistics()
-	PackCount() (totalRead int64, totalWriting int64, totalWritten int64, popRead int64, popWritten int64)
+	PackCount() (totalRead int64, totalWritten int64, popRead int64, popWritten int64)
 	DataUsage() (totalRead int64, totalWritten int64, popRead int64, popWritten int64)
 	CloseAllConnections()
 }
@@ -158,7 +158,6 @@ type netHub struct {
 	totalWrittenCount     int64
 	popReadCount          int64
 	popWrittenCount       int64
-	totalWritingCount     int64
 	totalReadDataUsage    int64
 	totalWrittenDataUsage int64
 	popReadDataUsage      int64
@@ -174,6 +173,7 @@ func (hub *netHub) Add(key string, conn NetConn) {
 		hub.lbConnections.Append(conn)
 	}
 	log4g.Info("add new connection %s to hub", key)
+	log4g.Info("connection count: %d", hub.Count())
 }
 
 func (hub *netHub) Key(conn NetConn, key string) {
@@ -264,8 +264,8 @@ func (hub *netHub) heartbeat(mode HeartbeatMode) {
 	//}
 
 	go func() {
-		heartbeatTimeout := (NetConfig.NetTolerableTime + NetConfig.HeartbeatFrequency) * time.Second
-		heartbeatTicker := time.NewTicker(NetConfig.HeartbeatFrequency * time.Second)
+		heartbeatTimeout := time.Duration(NetConfig.NetTolerableTime + NetConfig.HeartbeatFrequency) * time.Second
+		heartbeatTicker := time.NewTicker(time.Duration(NetConfig.HeartbeatFrequency) * time.Second)
 		for {
 			select {
 			case t := <-heartbeatTicker.C:
@@ -276,7 +276,7 @@ func (hub *netHub) heartbeat(mode HeartbeatMode) {
 						beattime := conn.Session().GetInt64(HEART_BEAT_TIME)
 						timeout := beattime + heartbeatTimeout.Nanoseconds()
 						if now > timeout {
-							log4g.Warn("connection timeout: %s", conn.RemoteAddr().String())
+							log4g.Info("connection timeout: %s", conn.RemoteAddr().String())
 							log4g.Debug("now=%v,beattime=%v,timeout=%v", t, time.Unix(beattime/int64(time.Second), beattime%int64(time.Second)), time.Unix(timeout/int64(time.Second), timeout%int64(time.Second)))
 							hub.Remove(conn)
 							conn.Close()
@@ -300,7 +300,7 @@ func (hub *netHub) Heartbeat(conn NetConn) {
 func (hub *netHub) Kick(key string) bool {
 	if conn := hub.Get(key); conn != nil {
 		hub.Remove(conn)
-		log4g.Warn("kicked connection %s", conn.RemoteAddr().String())
+		log4g.Info("kicked connection %s", conn.RemoteAddr().String())
 		log4g.Info("connection count: %d", hub.Count())
 		return true
 	}
@@ -372,8 +372,8 @@ func (hub *netHub) Send(key string, v interface{}) error {
 			log4g.Debug("sent to %s", key)
 		}
 	} else {
-		err = errors.New(fmt.Sprintf("connection %s not found", key))
-		log4g.Warn(err)
+		err = errors.New(fmt.Sprintf("sending to connection %s, but not found", key))
+		log4g.Error(err)
 	}
 	return err
 }
@@ -390,7 +390,7 @@ func (hub *netHub) MultiSend(keys []string, v interface{}) error {
 				}
 			}
 			if err = conn.Write(data); err != nil {
-				log4g.Warn(err)
+				log4g.Error(err)
 			}
 		}
 	}
@@ -455,7 +455,6 @@ func (hub *netHub) RangeSession(f func(session NetSession)) {
 }
 
 func (hub *netHub) Statistics() {
-	hub.totalWritingCount = 0
 	hub.connections.Range(func(key, value interface{}) bool {
 		if value != nil {
 			conn := value.(NetConn)
@@ -469,15 +468,13 @@ func (hub *netHub) Statistics() {
 			hub.totalWrittenDataUsage += wdu
 			hub.popReadDataUsage += rdu
 			hub.popWriteDataUsage += wdu
-			hub.totalWritingCount += conn.WritingCount()
 		}
 		return true
 	})
 }
 
-func (hub *netHub) PackCount() (totalRead int64, totalWriting int64, totalWritten int64, popRead int64, popWritten int64) {
+func (hub *netHub) PackCount() (totalRead int64, totalWritten int64, popRead int64, popWritten int64) {
 	totalRead = hub.totalReadCount
-	totalWriting = hub.totalWritingCount
 	totalWritten = hub.totalWrittenCount
 	popRead = hub.popReadCount
 	hub.popReadCount = 0

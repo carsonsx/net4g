@@ -8,18 +8,48 @@ import (
 	"sync"
 	"time"
 	"bytes"
+	"container/list"
 )
 
+type Handler interface {
+
+}
+
+type Pipeline interface {
+	AddLast(handler Handler)
+	AddFist(handler Handler)
+}
+
+type pipeline struct {
+	handlers list.List
+}
+
+func (p *pipeline) AddFirst(handler Handler)  {
+	p.handlers.PushFront(handler)
+}
+
+func (p *pipeline) AddLast(handler Handler)  {
+	p.handlers.PushBack(handler)
+}
+
+func (p *pipeline) Slice() []Handler {
+	var handlers []Handler
+	for e:=p.handlers.Front() ; e !=nil ; e=e.Next() {
+		handlers = append(handlers, e.Value)
+	}
+	return handlers
+}
+
 type NetConn interface {
-	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	//Pipeline() Pipeline
 	Read() (p []byte, err error)
 	Write(p []byte) error
 	Session() NetSession
 	Close()
 	IsClosed() bool
 	NotWrittenData() [][]byte
-	WritingCount() int64
 	PopCount() (read int64, write int64)
 	PopDataUsage() (read int64, write int64)
 }
@@ -54,7 +84,6 @@ type tcpNetConn struct {
 	buffer           []byte
 	offset           int
 	readCount        int64
-	writingCount     int64
 	writtenCount     int64
 	readDataUsage    int64
 	writeDataUsage   int64
@@ -207,7 +236,6 @@ func (c *tcpNetConn) startWriting() {
 				} else {
 					c.session.Set(SESSION_CONNECT_LAST_WRITE_TIME, time.Now())
 					c.writtenCount++
-					//atomic.AddInt64(&c.writingCount, -1)
 					//log4g.Info("written countMsg %d %s", c.writtenCount, c.RemoteAddr())
 					c.writeDataUsage += int64(len(pack))
 				}
@@ -225,11 +253,9 @@ func (c *tcpNetConn) Write(p []byte) error {
 		err = errors.New(text)
 		if NetConfig.KeepWriteData {
 			c.writeChan <- p
-			//atomic.AddInt64(&c.writingCount, 1)
 		}
 	} else {
 		c.writeChan <- p
-		//atomic.AddInt64(&c.writingCount, 1)
 	}
 
 	return err
@@ -273,10 +299,6 @@ func (c *tcpNetConn) IsClosed() bool {
 
 func (c *tcpNetConn) Session() NetSession {
 	return c.session
-}
-
-func (c *tcpNetConn) WritingCount() int64 {
-	return c.writingCount
 }
 
 func (c *tcpNetConn) PopCount() (read int64, write int64) {
