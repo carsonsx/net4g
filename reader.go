@@ -1,15 +1,10 @@
 package net4g
 
 import (
-	"bytes"
 	"github.com/carsonsx/log4g"
 	"runtime/debug"
 	"time"
 )
-
-func IsHeartbeatData(data []byte) bool {
-	return len(data) == len(NetConfig.HeartbeatData) && bytes.Equal(data, NetConfig.HeartbeatData)
-}
 
 type NetReader interface {
 	Read(after func(data []byte) bool)

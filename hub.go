@@ -28,6 +28,8 @@ type NetHub interface {
 	Key(conn NetConn, key string)
 	Get(key string) NetConn
 	Remove(conn NetConn) bool
+	IsOnline(key string) bool
+	IsOffline(key string) bool
 	Slice() []NetConn
 	Count() int
 	Heartbeat(conn NetConn)
@@ -149,7 +151,9 @@ func (s *connSlice) Remove(conn NetConn) bool {
 }
 
 type netHub struct {
-	connections           Map
+	connections           sync.Map
+	connectionCount       int
+	countMutex            sync.Mutex
 	groupConns            GroupConns
 	enableLB              bool
 	lbConnections         connSlice
@@ -164,11 +168,17 @@ type netHub struct {
 	popWriteDataUsage     int64
 }
 
+func (hub *netHub) incrCount(count int)  {
+	hub.countMutex.Lock()
+	defer hub.countMutex.Unlock()
+	hub.connectionCount += count
+}
 
 func (hub *netHub) Add(key string, conn NetConn) {
 	hub.Heartbeat(conn)
 	conn.Session().Set(SESSION_CONNECT_KEY, key)
 	hub.connections.Store(key, conn)
+	hub.incrCount(1)
 	if hub.enableLB {
 		hub.lbConnections.Append(conn)
 	}
@@ -202,6 +212,7 @@ func (hub *netHub) Remove(conn NetConn) bool {
 		return false
 	}
 	hub.connections.Delete(conn.Session().GetString(SESSION_CONNECT_KEY))
+	hub.incrCount(-1)
 	if hub.enableLB {
 		hub.lbConnections.Remove(conn)
 	}
@@ -218,6 +229,17 @@ func (hub *netHub) Remove(conn NetConn) bool {
 
 }
 
+func (hub *netHub) IsOnline(key string) bool {
+	if _, ok := hub.connections.Load(key); ok {
+		return true
+	}
+	return false
+}
+
+func (hub *netHub) IsOffline(key string) bool {
+	return !hub.IsOnline(key)
+}
+
 func (hub *netHub) Slice() []NetConn {
 	var conns []NetConn
 	hub.connections.Range(func(key, value interface{}) bool {
@@ -230,7 +252,7 @@ func (hub *netHub) Slice() []NetConn {
 }
 
 func (hub *netHub) Count() int {
-	return hub.connections.Len()
+	return hub.connectionCount
 }
 
 func (hub *netHub) heartbeat(mode HeartbeatMode) {
@@ -293,7 +315,7 @@ func (hub *netHub) heartbeat(mode HeartbeatMode) {
 }
 
 func (hub *netHub) Heartbeat(conn NetConn) {
-	log4g.Debug("remote %s heartbeat to local %s", conn.RemoteAddr(), conn.LocalAddr())
+	log4g.Debug("[%s]remote %s heartbeat to local %s", conn.Session().GetString(SESSION_CONNECT_KEY), conn.RemoteAddr(), conn.LocalAddr())
 	conn.Session().Set(HEART_BEAT_TIME, time.Now().UnixNano())
 }
 
@@ -373,7 +395,12 @@ func (hub *netHub) Send(key string, v interface{}) error {
 		}
 	} else {
 		err = errors.New(fmt.Sprintf("sending to connection %s, but not found", key))
-		log4g.Error(err)
+		log4g.Info(err)
+		data, err := Serialize(hub.serializer, v)
+		if err != nil {
+			return err
+		}
+		NetCache.Add(key, data)
 	}
 	return err
 }
@@ -501,6 +528,5 @@ func (hub *netHub) CloseAllConnections() {
 		}
 		return true
 	})
-	hub.connections.Clear()
 	log4g.Info("connection count: %d", hub.Count())
 }

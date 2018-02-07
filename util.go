@@ -2,6 +2,7 @@ package net4g
 
 import (
 	"encoding/binary"
+	"bytes"
 )
 
 func AddIntHeader(data []byte, headerSize int, header uint64, littleEndian bool) []byte {
@@ -61,4 +62,8 @@ func GetIntHeader(data []byte, headerSize int, littleEndian bool) int64 {
 		panic("wrong header length")
 	}
 	return header
+}
+
+func IsHeartbeatData(data []byte) bool {
+	return len(data) == len(NetConfig.HeartbeatData) && bytes.Equal(data, NetConfig.HeartbeatData)
 }

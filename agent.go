@@ -107,6 +107,7 @@ type NetAgent interface {
 	Session() NetSession
 	Key(key ...string) string
 	Write(v interface{}, h ...interface{}) error
+	ReWrite()
 	Close()
 	IsClosed() bool
 }
@@ -166,11 +167,18 @@ func (a *netAgent) Key(key ...string) string {
 }
 
 func (a *netAgent) Write(v interface{}, h ...interface{}) error {
+	if v == nil {
+		return nil
+	}
 	data, err := Serialize(a.serializer, v, h...)
 	if err != nil {
 		return err
 	}
 	return a.conn.Write(data)
+}
+
+func (a *netAgent) ReWrite() {
+	NetCache.Write(a.Key(), a.conn)
 }
 
 func (a *netAgent) Close() {

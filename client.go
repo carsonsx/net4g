@@ -181,7 +181,7 @@ func (c *TCPClient) doConnect(addr string) {
 
 		if c.closed || !c.AutoReconnect {
 			log4g.Info("disconnected")
-			log4g.Error(err)
+			log4g.ErrorIf(err)
 			c.sig <- Terminal
 			if !connected {
 				c.firstConnected.Done()
@@ -200,6 +200,7 @@ func (c *TCPClient) doConnect(addr string) {
 
 func (c *TCPClient) connect(addr string) (conn NetConn, err error) {
 	var netconn net.Conn
+	log4g.Info("try to connect %s", addr)
 	netconn, err = net.Dial("tcp", addr)
 	if err != nil {
 		log4g.Error(err)

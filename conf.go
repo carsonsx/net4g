@@ -21,19 +21,19 @@ var NetConfig struct {
 	MaxLength              uint64   `json:"max_length"`
 	BeginBytes             []byte   `json:"-"`
 	EndBytes               []byte   `json:"-"`
-	HeaderSize             int      `json:"header_size"`
-	LengthIndex            int      `json:"length_index"`
-	LengthSize         int    `json:"length_size"`
-	LittleEndian       bool   `json:"little_endian"`
-	DispatchChanSize   int    `json:"dispatch_chan_size"`
-	WriteChanSize      int    `json:"write_chan_size"`
-	HeartbeatFrequency int    `json:"heartbeat_frequency"`
-	HeartbeatData      []byte `json:"heartbeat_data"`
-	NetTolerableTime   int    `json:"net_tolerable_time"`
-	IdSize             int    `json:"id_size"`
-	KeepWriteData      bool   `json:"keep_write_data"`
-	TimeTickerInterval int    `json:"time_event_check_interval"`
-	MonitorBeat        int    `json:"monitor_beat"`
+	HeaderSize           int    `json:"header_size"`
+	LengthIndex          int    `json:"length_index"`
+	LengthSize           int    `json:"length_size"`
+	LittleEndian         bool   `json:"little_endian"`
+	DispatchChanSize     int    `json:"dispatch_chan_size"`
+	WriteChanSize        int    `json:"write_chan_size"`
+	HeartbeatFrequency   int    `json:"heartbeat_frequency"`
+	HeartbeatData        []byte `json:"heartbeat_data"`
+	NetTolerableTime     int    `json:"net_tolerable_time"`
+	IdSize               int    `json:"id_size"`
+	CacheWriteFailedData bool `json:"cache_write_failed_data"`
+	TimeTickerInterval   int    `json:"time_event_check_interval"`
+	MonitorBeat          int    `json:"monitor_beat"`
 }
 
 func init() {

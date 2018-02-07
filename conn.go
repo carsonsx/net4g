@@ -1,18 +1,17 @@
 package net4g
 
 import (
+	"bytes"
+	"container/list"
 	"errors"
 	"github.com/carsonsx/log4g"
 	"io"
 	"net"
 	"sync"
 	"time"
-	"bytes"
-	"container/list"
 )
 
 type Handler interface {
-
 }
 
 type Pipeline interface {
@@ -24,17 +23,17 @@ type pipeline struct {
 	handlers list.List
 }
 
-func (p *pipeline) AddFirst(handler Handler)  {
+func (p *pipeline) AddFirst(handler Handler) {
 	p.handlers.PushFront(handler)
 }
 
-func (p *pipeline) AddLast(handler Handler)  {
+func (p *pipeline) AddLast(handler Handler) {
 	p.handlers.PushBack(handler)
 }
 
 func (p *pipeline) Slice() []Handler {
 	var handlers []Handler
-	for e:=p.handlers.Front() ; e !=nil ; e=e.Next() {
+	for e := p.handlers.Front(); e != nil; e = e.Next() {
 		handlers = append(handlers, e.Value)
 	}
 	return handlers
@@ -229,9 +228,7 @@ func (c *tcpNetConn) startWriting() {
 				_, err := c.conn.Write(pack)
 				if err != nil {
 					log4g.Error(err)
-					if NetConfig.KeepWriteData {
-						c.writeChan <- writingData
-					}
+					NetCache.Add(c.session.GetString(SESSION_CONNECT_KEY), writingData)
 					break outer
 				} else {
 					c.session.Set(SESSION_CONNECT_LAST_WRITE_TIME, time.Now())
@@ -246,14 +243,15 @@ func (c *tcpNetConn) startWriting() {
 }
 
 func (c *tcpNetConn) Write(p []byte) error {
+	if p == nil {
+		return nil
+	}
 	var err error
 	if c.closed {
 		text := "write to closed network connection"
 		log4g.Info(text)
 		err = errors.New(text)
-		if NetConfig.KeepWriteData {
-			c.writeChan <- p
-		}
+		NetCache.Add(c.session.GetString(SESSION_CONNECT_KEY), p)
 	} else {
 		c.writeChan <- p
 	}
@@ -262,21 +260,14 @@ func (c *tcpNetConn) Write(p []byte) error {
 }
 
 func (c *tcpNetConn) NotWrittenData() [][]byte {
-	var data [][]byte
-outer:
-	for {
-		select {
-		case d := <-c.writeChan:
-			data = append(data, d)
-		default:
-			break outer
-		}
+	if value, ok := NetCache.cacheData.Load(c.session.GetString(SESSION_CONNECT_KEY)); ok {
+		return value.([][]byte)
 	}
-	return data
+	return nil
 }
 
 func (c *tcpNetConn) Close() {
-	log4g.Debug("closing connection %s", c.RemoteAddr().String())
+	log4g.Info("closing connection %s", c.RemoteAddr().String())
 	c.closing = true
 	c.closeMutex.Lock()
 	defer c.closeMutex.Unlock()

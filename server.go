@@ -163,7 +163,6 @@ func (s *TCPServer) listen() {
 		}
 		netconn, err := s.listener.Accept()
 		if err != nil {
-			log4g.ErrorStack(err)
 			if neterr, ok := err.(net.Error); ok && neterr.Temporary() {
 				delay = gutil.SmartSleep(delay, maxDelay)
 				continue

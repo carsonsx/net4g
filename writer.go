@@ -31,8 +31,8 @@ func (c *netWriter) doWrite() {
 			//	break outer
 			case writingData := <-c.writeChan:
 				if err := c.conn.Write(writingData); err != nil {
-					if NetConfig.KeepWriteData {
-						c.writeChan <- writingData
+					if NetConfig.CacheWriteFailedData {
+						//c.writeChan <- writingData
 					}
 				}
 			}
